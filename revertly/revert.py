@@ -91,17 +91,31 @@ def _rename_pairs(session_id: str, since: float = 0.0) -> List[tuple]:
     return pairs
 
 
-def _walk_rel(root: str) -> List[str]:
+def _walk_rel(root: str, is_excluded=None, logical_root: str = None) -> List[str]:
     """Sorted list of REGULAR file paths under root, relative to root.
 
     Skips FIFOs/sockets/devices (opening a FIFO to hash it blocks forever)
     and symlinks (following them would let the plan escape the project or
     hash a device). Only regular files are revert candidates.
+
+    `is_excluded(path)`: if given, prune the same dirs/files the clone and
+    watcher exclude (node_modules, .git, .claude, …). CRITICAL: without this,
+    files excluded from the clone but present in cwd look "created during the
+    session" and a full revert would DELETE them (e.g. your whole .git).
+    Excludes are matched against the LOGICAL path (`logical_root` + rel) so a
+    clone under ~/.revertly is judged by its project-relative location.
     """
     out = []
-    for dirpath, _dirs, files in os.walk(root):
+    logical_root = logical_root or root
+    for dirpath, dirs, files in os.walk(root):
+        rel_dir = os.path.relpath(dirpath, root)
+        base = logical_root if rel_dir == "." else os.path.join(logical_root, rel_dir)
+        if is_excluded is not None:
+            dirs[:] = [d for d in dirs if not is_excluded(os.path.join(base, d))]
         for fn in files:
             full = os.path.join(dirpath, fn)
+            if is_excluded is not None and is_excluded(os.path.join(base, fn)):
+                continue
             try:
                 st = os.lstat(full)
             except OSError:
@@ -123,6 +137,10 @@ class Reverter:
         self.cwd = os.path.abspath(self.meta.cwd)
         self.clone = self.meta.clone_path or os.path.join(self.session_dir, "clone")
         self.clone = os.path.abspath(self.clone)
+        # the same exclude set the clone/watcher use — so the plan never treats
+        # an excluded-but-present cwd file (.git, node_modules) as revertible.
+        from revertly.config import load as _load_cfg
+        self._excluded = _load_cfg(paths.config_path()).is_excluded
         # Conflict cutoff: prefer meta.ended, but a session killed before
         # seal() has ended=None. Falling back to +inf would disable the
         # "modified after end" rule entirely (silently clobbering later
@@ -148,7 +166,7 @@ class Reverter:
         if not os.path.isdir(self.clone):
             return False, "no pre-image (clone dir missing) — nothing to revert from"
         if not self.meta.armed:
-            has_clone = any(True for _ in _walk_rel(self.clone))
+            has_clone = any(True for _ in _walk_rel(self.clone, self._excluded, self.cwd))
             if not has_clone:
                 return (False,
                         "session did not fully arm and its pre-image is empty; "
@@ -265,8 +283,10 @@ class Reverter:
     def _build_plan(self, path_filter) -> RevertPlan:
         plan = RevertPlan(session_id=self.session_id)
 
-        clone_rels = set(_walk_rel(self.clone)) if os.path.isdir(self.clone) else set()
-        cwd_rels = set(_walk_rel(self.cwd)) if os.path.isdir(self.cwd) else set()
+        clone_rels = (set(_walk_rel(self.clone, self._excluded, self.cwd))
+                      if os.path.isdir(self.clone) else set())
+        cwd_rels = (set(_walk_rel(self.cwd, self._excluded))
+                    if os.path.isdir(self.cwd) else set())
 
         for rel in sorted(clone_rels | cwd_rels):
             abs_path = os.path.join(self.cwd, rel)

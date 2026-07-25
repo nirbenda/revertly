@@ -550,6 +550,21 @@ class TestMoveChainRobustness(RevertTestCase):
         self.assertFalse(os.path.islink(self._abs("f.txt")))
         self.assertEqual(self.fx.read_project("f.txt"), b"original")
 
+    def test_excluded_cwd_files_never_marked_for_deletion(self):
+        # CRITICAL: the clone excludes .git/node_modules, but they're present in
+        # cwd. Without honoring excludes in the plan, a full revert would delete
+        # your entire .git. The plan must leave excluded paths alone.
+        self.fx.seed("app.py", "orig")
+        self.fx.modify("app.py", "changed")
+        self.fx.create(".git/objects/ab/deadbeef", "a real commit object")
+        self.fx.create("node_modules/pkg/index.js", "a dependency")
+        self.fx.finalize()
+        plan = Reverter(paths.session_dir(self.fx.sid)).plan()
+        deleted = {os.path.relpath(c.path, self.fx.project) for c in plan.deletes}
+        self.assertEqual(deleted, set(), "excluded files must not be deleted")
+        restored = {os.path.relpath(c.path, self.fx.project) for c in plan.restores}
+        self.assertEqual(restored, {"app.py"})
+
     def test_deleted_target_replaced_by_symlink_conflicts(self):
         # session deleted f.txt; a LATER session put a symlink at that path.
         # Restoring must flag a conflict, not silently clobber the symlink.
