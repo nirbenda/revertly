@@ -358,5 +358,36 @@ class TestDryRun(RevertTestCase):
             self.assertFalse(os.path.exists(paths.session_dir(result)))
 
 
+class TestPlanPathsGlobs(RevertTestCase):
+    def _session(self):
+        self.fx.seed("src/app.py", "orig-app")
+        self.fx.seed("src/util.py", "orig-util")
+        self.fx.seed("docs/readme.md", "orig-docs")
+        self.fx.modify("src/app.py", "changed-app")
+        self.fx.modify("src/util.py", "changed-util")
+        self.fx.modify("docs/readme.md", "changed-docs")
+        self.fx.finalize()
+        return Reverter(paths.session_dir(self.fx.sid))
+
+    def test_glob_selects_by_extension_at_any_depth(self):
+        plan = self._session().plan_paths(["*.py"])
+        got = sorted(os.path.relpath(c.path, self.fx.project)
+                     for c in plan.restores)
+        self.assertEqual(got, ["src/app.py", "src/util.py"])
+
+    def test_glob_relative_pattern(self):
+        plan = self._session().plan_paths(["src/*.py"])
+        self.assertEqual(len(plan.restores), 2)
+
+    def test_glob_and_prefix_mix(self):
+        plan = self._session().plan_paths(["docs", "*.py"])
+        self.assertEqual(len(plan.restores), 3)
+
+    def test_prefix_semantics_still_exact(self):
+        plan = self._session().plan_paths(["docs"])
+        got = [os.path.relpath(c.path, self.fx.project) for c in plan.restores]
+        self.assertEqual(got, ["docs/readme.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,18 +112,29 @@ class Reverter:
         return self._build_plan(path_filter=None)
 
     def plan_paths(self, paths_arg: List[str]) -> RevertPlan:
-        """Revert restricted to the given files/dirs.
+        """Revert restricted to the given files/dirs/globs.
 
         Each entry may be absolute or relative to cwd. A directory includes
-        everything beneath it.
+        everything beneath it. Entries containing * ? or [ are fnmatch globs,
+        matched against the cwd-relative path and the basename (so `*.py`
+        selects every .py the session touched, at any depth).
         """
-        prefixes = [self._normalize(p) for p in paths_arg]
+        import fnmatch
+
+        globs = [p for p in paths_arg if any(c in p for c in "*?[")]
+        prefixes = [self._normalize(p) for p in paths_arg if p not in globs]
 
         def keep(abs_path: str) -> bool:
             for pre in prefixes:
                 if abs_path == pre:
                     return True
                 if abs_path.startswith(pre + os.sep):
+                    return True
+            rel = os.path.relpath(abs_path, self.cwd)
+            base = os.path.basename(abs_path)
+            for g in globs:
+                if (fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(base, g)
+                        or fnmatch.fnmatch(abs_path, g)):
                     return True
             return False
 

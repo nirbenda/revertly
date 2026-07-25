@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revertly"
+version = "0.1.0"
+description = "A seatbelt, not a cage — run AI coding agents at full speed; everything they touch is journaled, versioned, and revertible."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [{ name = "Nir Ben David" }]
+keywords = ["ai-agents", "claude", "safety", "undo", "snapshot", "macos", "apfs"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: System :: Recovery Tools",
+]
+# zero runtime dependencies — pure stdlib, by design
+
+[project.scripts]
+revertly = "revertly.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/nirbendavid/revertly"
+
+[tool.setuptools]
+packages = ["revertly", "revertly.ui"]
+
+[tool.setuptools.package-data]
+"revertly.ui" = ["index.html"]

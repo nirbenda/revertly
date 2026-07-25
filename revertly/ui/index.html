@@ -2,6 +2,7 @@
   revertly control panel — single self-contained page.
   Stdlib-served, no build step, no CDN, no third-party JS/CSS.
   Marker string used by tests: "revertly control panel"
+  __REVERTLY_TOKEN__ is replaced by the server at serve time (CSRF guard).
 -->
 <meta charset="utf-8">
 <title>revertly control panel</title>
@@ -38,6 +39,7 @@
   .row:hover { background: var(--panel2); }
   .row .name { font-weight: 600; }
   .row .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .row .name .del-btn { float: right; }
   .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; margin-left: 6px; }
   .badge.trip { background: rgba(255,92,92,.18); color: var(--alert); }
   .badge.out { background: rgba(230,180,90,.18); color: var(--warn); }
@@ -54,9 +56,14 @@
     background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
     border-radius: 6px; padding: 7px 10px; font-size: 13px;
   }
+  input[type=text] { min-width: 260px; }
+  input[type=text]::placeholder { color: var(--muted); }
   button.act { cursor: pointer; }
   button.act:hover { border-color: var(--accent); }
   button.primary { background: var(--accent); color: #06121e; border-color: var(--accent); font-weight: 600; }
+  button.danger { background: transparent; color: var(--alert); border-color: rgba(255,92,92,.4); }
+  button.danger:hover { border-color: var(--alert); }
+  button.mini { padding: 2px 8px; font-size: 11px; border-radius: 5px; }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
   pre.diff { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   pre.diff .add { color: var(--ok); }
@@ -68,15 +75,23 @@
   .cli { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; }
   .empty { color: var(--muted); padding: 20px 0; }
   label.chk { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .hit { display: flex; gap: 10px; align-items: center; padding: 6px 14px; border-bottom: 1px solid var(--line); font-family: ui-monospace, monospace; font-size: 12px; }
+  .hit:last-child { border-bottom: 0; }
+  .hit .p { flex: 1; word-break: break-all; }
+  .hit .k { color: var(--accent); min-width: 84px; }
+  .hit.risky .k { color: var(--alert); }
+  .ok-note { color: var(--ok); }
+  .err-note { color: var(--alert); }
 </style>
 
 <header>
   <h1>revertly control panel</h1>
-  <span class="sub">local · offline · read + revert-preview over ~/.revertly</span>
+  <span class="sub">local · offline · inspect + guarded actions over ~/.revertly</span>
 </header>
 
 <nav>
   <button data-tab="timeline" class="active">Timeline</button>
+  <button data-tab="find">Find</button>
   <button data-tab="diff">Diff</button>
   <button data-tab="revert">Revert</button>
   <button data-tab="live">Live</button>
@@ -85,10 +100,28 @@
 <main>
   <section id="tab-timeline" class="tab active">
     <div class="toolbar">
+      <input type="text" id="tl-filter" placeholder="filter sessions — name, id, or path…">
+      <input type="text" id="tl-evfilter" placeholder="filter events inside a session…">
       <button class="act" id="tl-refresh">Refresh</button>
       <span class="sub" id="tl-count"></span>
     </div>
     <div id="tl-list"></div>
+  </section>
+
+  <section id="tab-find" class="tab">
+    <div class="toolbar">
+      <input type="text" id="find-q" placeholder="path substring or glob (*.env, TEMP.md, src/*)…">
+      <select id="find-op">
+        <option value="">any op</option>
+        <option value="write">write</option>
+        <option value="create">create</option>
+        <option value="delete">delete</option>
+        <option value="rename">rename</option>
+      </select>
+      <button class="act primary" id="find-go">Search all sessions</button>
+      <span class="sub" id="find-count"></span>
+    </div>
+    <div id="find-out"></div>
   </section>
 
   <section id="tab-diff" class="tab">
@@ -96,6 +129,10 @@
       <select id="diff-session"></select>
       <select id="diff-path"></select>
       <button class="act primary" id="diff-go">Show diff</button>
+      <button class="act" id="diff-view-pre">View pre</button>
+      <button class="act" id="diff-view-cur">View cur</button>
+      <button class="act" id="diff-dl-pre">Download pre</button>
+      <button class="act" id="diff-dl-cur">Download cur</button>
     </div>
     <pre class="diff" id="diff-out">Pick a session and a changed path.</pre>
   </section>
@@ -103,7 +140,11 @@
   <section id="tab-revert" class="tab">
     <div class="toolbar">
       <select id="rev-session"></select>
-      <button class="act primary" id="rev-preview">Preview revert (dry-run)</button>
+      <input type="text" id="rev-filter" placeholder="filter paths…">
+      <button class="act mini" id="rev-all">all</button>
+      <button class="act mini" id="rev-none">none</button>
+      <button class="act primary" id="rev-preview">Preview (dry-run)</button>
+      <button class="act danger" id="rev-execute">Revert selected…</button>
     </div>
     <div class="card" id="rev-paths"></div>
     <div class="summary" id="rev-summary" style="display:none"></div>
@@ -121,13 +162,18 @@
 <script>
 "use strict";
 var API = "";
+var TOKEN = "__REVERTLY_TOKEN__";
 function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
 function getJSON(url) { return fetch(API + url).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; }); }); }
 function postJSON(url, payload) {
-  return fetch(API + url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+  return fetch(API + url, { method: "POST", headers: { "Content-Type": "application/json", "X-Revertly-Token": TOKEN }, body: JSON.stringify(payload) })
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; }); });
 }
 function fmtTime(t) { if (!t) return ""; try { return new Date(t * 1000).toLocaleString(); } catch (e) { return String(t); } }
+function matches(hay, q) { if (!q) return true; if (!hay) return false; return hay.toLowerCase().indexOf(q.toLowerCase()) !== -1; }
+function fileURL(sid, path, which) {
+  return "/api/session/" + encodeURIComponent(sid) + "/file?path=" + encodeURIComponent(path) + "&which=" + which;
+}
 
 // ---- tabs ----
 var navButtons = document.querySelectorAll("nav button");
@@ -140,6 +186,9 @@ navButtons.forEach(function(btn){
     if (btn.dataset.tab === "diff" || btn.dataset.tab === "revert") populateSessionPickers();
   });
 });
+function switchTab(name) {
+  navButtons.forEach(function(b){ if (b.dataset.tab === name) b.click(); });
+}
 
 // ---- Timeline ----
 var FLAG_KINDS = { tripwire: 1, self_tamper: 1 };
@@ -149,11 +198,16 @@ function eventIsFlagged(ev, cwd) {
   if (ev.kind === "fs" && ev.path && cwd && ev.path.indexOf(cwd) !== 0) return true;
   return false;
 }
-function renderTimeline(rows) {
+var tlRows = [];
+function renderTimeline() {
+  var q = document.getElementById("tl-filter").value;
   var list = document.getElementById("tl-list");
   list.innerHTML = "";
-  document.getElementById("tl-count").textContent = rows.length + " session(s)";
-  if (!rows.length) { list.appendChild(el("div", "empty", "No sessions yet.")); return; }
+  var rows = tlRows.filter(function(s){
+    return matches(s.name, q) || matches(s.id, q) || matches(s.cwd, q);
+  });
+  document.getElementById("tl-count").textContent = rows.length + " / " + tlRows.length + " session(s)";
+  if (!rows.length) { list.appendChild(el("div", "empty", "No matching sessions.")); return; }
   rows.forEach(function(s){
     var card = el("div", "card");
     var row = el("div", "row");
@@ -162,6 +216,9 @@ function renderTimeline(rows) {
     if (s.outside_count) name.appendChild(el("span", "badge out", s.outside_count + " outside"));
     if (s.armed) name.appendChild(el("span", "badge armed", "armed"));
     if (s.is_revert) name.appendChild(el("span", "badge revert", "revert"));
+    var del = el("button", "act danger mini del-btn", "delete…");
+    del.addEventListener("click", function(e){ e.stopPropagation(); deleteSession(s); });
+    name.appendChild(del);
     row.appendChild(name);
     row.appendChild(el("div", "meta", s.id + " · " + (s.cwd || "?") + " · " + s.event_count + " events · " + fmtTime(s.started)));
     var ev = el("div", "events"); ev.style.display = "none";
@@ -169,9 +226,10 @@ function renderTimeline(rows) {
       if (ev.style.display === "none") {
         if (!ev.dataset.loaded) {
           getJSON("/api/session/" + encodeURIComponent(s.id)).then(function(res){
-            renderEvents(ev, res.body, s.cwd); ev.dataset.loaded = "1";
+            ev._data = res.body; ev._cwd = s.cwd; ev.dataset.loaded = "1";
+            renderEvents(ev);
           });
-        }
+        } else { renderEvents(ev); }
         ev.style.display = "";
       } else { ev.style.display = "none"; }
     });
@@ -179,24 +237,109 @@ function renderTimeline(rows) {
     list.appendChild(card);
   });
 }
-function renderEvents(container, data, cwd) {
+function renderEvents(container) {
+  var q = document.getElementById("tl-evfilter").value;
   container.innerHTML = "";
-  var events = (data && data.events) || [];
-  if (!events.length) { container.appendChild(el("div", "empty", "No events.")); return; }
+  var events = (container._data && container._data.events) || [];
+  var shown = 0;
   events.forEach(function(ev){
-    var line = el("div", "ev" + (eventIsFlagged(ev, cwd) ? " flag" : ""));
-    line.appendChild(el("span", "k", ev.kind + (ev.op ? "/" + ev.op : "")));
     var label = ev.path || ev.target || ev.tool || ev.detail || "";
+    if (q && !matches(label, q) && !matches(ev.kind, q) && !matches(ev.op || "", q)) return;
+    var line = el("div", "ev" + (eventIsFlagged(ev, container._cwd) ? " flag" : ""));
+    line.appendChild(el("span", "k", ev.kind + (ev.op ? "/" + ev.op : "")));
     line.appendChild(el("span", "p", label));
     container.appendChild(line);
+    shown++;
+  });
+  if (!shown) container.appendChild(el("div", "empty", q ? "No events match the filter." : "No events."));
+}
+function refilterOpenEvents() {
+  document.querySelectorAll("#tl-list .events").forEach(function(c){
+    if (c.style.display !== "none" && c.dataset.loaded) renderEvents(c);
   });
 }
-function loadTimeline() { getJSON("/api/sessions").then(function(res){ renderTimeline(res.body || []); }); }
+function deleteSession(s) {
+  var msg = "PERMANENTLY delete session " + s.id + (s.name ? " (" + s.name + ")" : "") +
+            "?\n\nIts journal, pre-images and revert points are gone forever — this is the one revertly action that cannot be undone." +
+            (s.tripwire_count ? "\n\n⚠ This session has " + s.tripwire_count + " tripwire event(s) — it may be evidence." : "");
+  if (!window.confirm(msg)) return;
+  postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", {}).then(function(res){
+    if (!res.ok) { window.alert("delete failed: " + ((res.body && res.body.error) || res.status)); return; }
+    loadTimeline();
+  });
+}
+function loadTimeline() { getJSON("/api/sessions").then(function(res){ tlRows = res.body || []; renderTimeline(); }); }
 document.getElementById("tl-refresh").addEventListener("click", loadTimeline);
+document.getElementById("tl-filter").addEventListener("input", renderTimeline);
+document.getElementById("tl-evfilter").addEventListener("input", refilterOpenEvents);
+
+// ---- Find (search all sessions) ----
+function runFind() {
+  var q = document.getElementById("find-q").value.trim();
+  if (!q) return;
+  var op = document.getElementById("find-op").value;
+  var out = document.getElementById("find-out");
+  out.innerHTML = ""; out.appendChild(el("div", "empty", "Searching…"));
+  getJSON("/api/find?q=" + encodeURIComponent(q) + (op ? "&op=" + op : "")).then(function(res){
+    out.innerHTML = "";
+    if (!res.ok) { out.appendChild(el("div", "empty err-note", (res.body && res.body.error) || "error")); return; }
+    var hits = res.body || [];
+    document.getElementById("find-count").textContent = hits.length + " event(s)";
+    if (!hits.length) { out.appendChild(el("div", "empty", "Nothing matches " + q + " in any session.")); return; }
+    var bySid = {};
+    hits.forEach(function(h){ (bySid[h.session_id] = bySid[h.session_id] || []).push(h); });
+    Object.keys(bySid).sort().reverse().forEach(function(sid){
+      var card = el("div", "card");
+      var head = el("div", "row");
+      head.style.cursor = "default";
+      var nm = el("div", "name", sid + (bySid[sid][0].session_name ? " (" + bySid[sid][0].session_name + ")" : ""));
+      head.appendChild(nm); card.appendChild(head);
+      bySid[sid].forEach(function(h){
+        var line = el("div", "hit" + ((h.kind !== "fs" || h.op === "delete") ? " risky" : ""));
+        line.appendChild(el("span", "k", h.kind + (h.op ? "/" + h.op : "")));
+        line.appendChild(el("span", "p", (fmtTime(h.t) ? fmtTime(h.t) + "  " : "") + h.path));
+        var bDiff = el("button", "act mini", "diff");
+        bDiff.addEventListener("click", function(){ jumpToDiff(h.session_id, h.path); });
+        var bDl = el("button", "act mini", "pre ⬇");
+        bDl.addEventListener("click", function(){ window.open(fileURL(h.session_id, h.path, "pre")); });
+        var bRes = el("button", "act danger mini", "restore…");
+        bRes.addEventListener("click", function(){ restoreOne(h.session_id, h.path); });
+        line.appendChild(bDiff); line.appendChild(bDl); line.appendChild(bRes);
+        card.appendChild(line);
+      });
+      out.appendChild(card);
+    });
+  });
+}
+document.getElementById("find-go").addEventListener("click", runFind);
+document.getElementById("find-q").addEventListener("keydown", function(e){ if (e.key === "Enter") runFind(); });
+function restoreOne(sid, path) {
+  postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: true }).then(function(res){
+    if (!res.ok) { window.alert("preview failed: " + ((res.body && res.body.error) || res.status)); return; }
+    var b = res.body;
+    if (!window.confirm("Revert this path from session " + sid + "?\n\n" + (b.summary || "") +
+                        "\n\nEquivalent CLI:\n" + (b.cli || "") +
+                        "\n\nNon-destructive: the revert is itself a session you can undo.")) return;
+    postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: false }).then(function(r2){
+      if (!r2.ok) { window.alert("revert failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
+      window.alert("Reverted.\nUndo with: revertly revert " + (r2.body.revert_id || "<revert-session>"));
+    });
+  });
+}
+function jumpToDiff(sid, path) {
+  switchTab("diff");
+  populateSessionPickers(function(){
+    var ss = document.getElementById("diff-session"); ss.value = sid;
+    loadDiffPaths(function(){
+      var ps = document.getElementById("diff-path"); ps.value = path;
+      document.getElementById("diff-go").click();
+    });
+  });
+}
 
 // ---- session pickers (shared by Diff + Revert) ----
 var sessionCache = [];
-function populateSessionPickers() {
+function populateSessionPickers(done) {
   getJSON("/api/sessions").then(function(res){
     sessionCache = res.body || [];
     [document.getElementById("diff-session"), document.getElementById("rev-session")].forEach(function(sel){
@@ -205,6 +348,7 @@ function populateSessionPickers() {
       if (prev) sel.value = prev;
     });
     loadDiffPaths(); loadRevertPaths();
+    if (done) done();
   });
 }
 function changedPathsFor(sessionId, cb) {
@@ -218,14 +362,15 @@ function changedPathsFor(sessionId, cb) {
 }
 
 // ---- Diff ----
-function loadDiffPaths() {
+function loadDiffPaths(done) {
   var sel = document.getElementById("diff-session"); if (!sel.value) return;
   changedPathsFor(sel.value, function(paths){
     var ps = document.getElementById("diff-path"); ps.innerHTML = "";
     paths.forEach(function(p){ var o = el("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
+    if (done) done();
   });
 }
-document.getElementById("diff-session").addEventListener("change", loadDiffPaths);
+document.getElementById("diff-session").addEventListener("change", function(){ loadDiffPaths(); });
 document.getElementById("diff-go").addEventListener("click", function(){
   var sid = document.getElementById("diff-session").value;
   var path = document.getElementById("diff-path").value;
@@ -242,6 +387,27 @@ document.getElementById("diff-go").addEventListener("click", function(){
     });
   });
 });
+function showWhole(which) {
+  var sid = document.getElementById("diff-session").value;
+  var path = document.getElementById("diff-path").value;
+  if (!sid || !path) return;
+  getJSON("/api/session/" + encodeURIComponent(sid) + "/diff?path=" + encodeURIComponent(path)).then(function(res){
+    var out = document.getElementById("diff-out"); out.innerHTML = "";
+    if (!res.ok) { out.textContent = (res.body && res.body.error) || "error"; return; }
+    var text = which === "pre" ? res.body.pre : res.body.cur;
+    out.textContent = text || "(" + which + " is empty or missing)";
+  });
+}
+document.getElementById("diff-view-pre").addEventListener("click", function(){ showWhole("pre"); });
+document.getElementById("diff-view-cur").addEventListener("click", function(){ showWhole("cur"); });
+document.getElementById("diff-dl-pre").addEventListener("click", function(){
+  var sid = document.getElementById("diff-session").value, p = document.getElementById("diff-path").value;
+  if (sid && p) window.open(fileURL(sid, p, "pre"));
+});
+document.getElementById("diff-dl-cur").addEventListener("click", function(){
+  var sid = document.getElementById("diff-session").value, p = document.getElementById("diff-path").value;
+  if (sid && p) window.open(fileURL(sid, p, "cur"));
+});
 
 // ---- Revert composer ----
 function loadRevertPaths() {
@@ -256,13 +422,37 @@ function loadRevertPaths() {
       lab.appendChild(cb); lab.appendChild(el("span", null, p));
       line.appendChild(lab); box.appendChild(line);
     });
+    applyRevFilter();
   });
 }
+function applyRevFilter() {
+  var q = document.getElementById("rev-filter").value;
+  document.querySelectorAll("#rev-paths .checkline").forEach(function(line){
+    line.style.display = matches(line.textContent, q) ? "" : "none";
+  });
+}
+function selectedRevPaths() {
+  var out = [];
+  document.querySelectorAll("#rev-paths .checkline").forEach(function(line){
+    if (line.style.display === "none") return;   // filtered out = not selected
+    var cb = line.querySelector("input[type=checkbox]");
+    if (cb && cb.checked) out.push(cb.value);
+  });
+  return out;
+}
 document.getElementById("rev-session").addEventListener("change", loadRevertPaths);
-document.getElementById("rev-preview").addEventListener("click", function(){
+document.getElementById("rev-filter").addEventListener("input", applyRevFilter);
+document.getElementById("rev-all").addEventListener("click", function(){
+  document.querySelectorAll("#rev-paths .checkline").forEach(function(line){
+    if (line.style.display !== "none") line.querySelector("input").checked = true;
+  });
+});
+document.getElementById("rev-none").addEventListener("click", function(){
+  document.querySelectorAll("#rev-paths input[type=checkbox]").forEach(function(c){ c.checked = false; });
+});
+function revertPreview(cb) {
   var sid = document.getElementById("rev-session").value; if (!sid) return;
-  var checks = document.querySelectorAll("#rev-paths input[type=checkbox]");
-  var paths = []; checks.forEach(function(c){ if (c.checked) paths.push(c.value); });
+  var paths = selectedRevPaths();
   var summ = document.getElementById("rev-summary");
   summ.style.display = ""; summ.textContent = "Previewing…";
   postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: paths, dry_run: true }).then(function(res){
@@ -271,7 +461,27 @@ document.getElementById("rev-preview").addEventListener("click", function(){
     if (!res.ok) { summ.appendChild(el("div", null, (res.body && res.body.error) || ("error " + res.status))); return; }
     var b = res.body;
     summ.appendChild(el("div", "name", "Dry-run plan: " + (b.summary || "")));
-    summ.appendChild(el("div", "cli", "$ revertly revert " + sid + " " + paths.join(" ") + "   # dry-run"));
+    (b.conflicts || []).forEach(function(c){
+      summ.appendChild(el("div", "err-note", "CONFLICT " + c.path + ": " + c.reason));
+    });
+    summ.appendChild(el("div", "cli", "$ " + (b.cli || "")));
+    if (cb) cb(sid, paths, b);
+  });
+}
+document.getElementById("rev-preview").addEventListener("click", function(){ revertPreview(null); });
+document.getElementById("rev-execute").addEventListener("click", function(){
+  revertPreview(function(sid, paths, plan){
+    var msg = "Execute this revert on session " + sid + "?\n\n" + (plan.summary || "") +
+              ((plan.conflicts || []).length ? "\n⚠ conflicts are SKIPPED (CLI --force to override)." : "") +
+              "\n\nNon-destructive: the revert is itself a session you can undo.";
+    if (!window.confirm(msg)) return;
+    var summ = document.getElementById("rev-summary");
+    postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: paths, dry_run: false }).then(function(res){
+      if (!res.ok) { summ.appendChild(el("div", "err-note", "revert failed: " + ((res.body && res.body.error) || res.status))); return; }
+      summ.appendChild(el("div", "ok-note", "Reverted ✓  (" + (res.body.summary || "") + ")"));
+      summ.appendChild(el("div", "cli", "undo: revertly revert " + (res.body.revert_id || "<revert-session>")));
+      loadTimeline();
+    });
   });
 });
 

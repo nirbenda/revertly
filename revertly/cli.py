@@ -2,8 +2,8 @@
 
 Usage:
   claude …                      (via the shim — arms the net automatically)
-  revertly status | last | log | diff | versions | revert | ui | config
-        | pause | resume | gc | doctor | install | shim
+  revertly status | last | log | find | diff | versions | revert | rm | ui
+        | config | pause | resume | gc | verify | doctor | install | shim
 """
 from __future__ import annotations
 
@@ -96,8 +96,97 @@ def cmd_log(args) -> int:
             continue
         if args.tool and e.tool != args.tool:
             continue
+        if args.path:
+            from .search import path_matches
+            if not path_matches(e.path, args.path):
+                continue
         ts = time.strftime("%H:%M:%S", time.localtime(e.t))
         print(f"{ts} {e.kind.value:11} {e.op.value if e.op else '':7} {e.path or e.tool or ''}")
+    return 0
+
+
+def cmd_find(args) -> int:
+    """Search EVERY session for a path — 'what happened to X, and when?'"""
+    from .search import find_events
+    since = None
+    if args.since:
+        spec = args.since.strip().lower()
+        try:
+            if spec.endswith("d"):
+                since = time.time() - float(spec[:-1]) * 86400
+            elif spec.endswith("h"):
+                since = time.time() - float(spec[:-1]) * 3600
+            else:
+                since = time.time() - float(spec) * 86400
+        except ValueError:
+            print(f"revertly: bad --since {args.since!r} (use e.g. 7d or 12h)")
+            return 2
+    hits = find_events(args.pattern, op=args.op, since=since)
+    if not hits:
+        print(f"revertly find: no events match {args.pattern!r}")
+        return 1
+    last_sid = None
+    for h in hits:
+        if h["session_id"] != last_sid:
+            last_sid = h["session_id"]
+            name = f"  ({h['session_name']})" if h["session_name"] else ""
+            print(f"{h['session_id']}{name}")
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(h["t"] or 0))
+        op = h["op"] or ""
+        print(f"  {ts}  {h['kind']}/{op:7} {h['path']}")
+        if h["kind"] == "fs" and op in ("delete", "write", "rename"):
+            print(f"           ↳ recover: revertly revert {h['session_id']} {h['path']}")
+    print(f"\n{len(hits)} event(s) across "
+          f"{len({h['session_id'] for h in hits})} session(s)")
+    return 0
+
+
+def _session_size(sid) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(paths.session_dir(sid)):
+        for fn in files:
+            try:
+                total += os.path.getsize(os.path.join(root, fn))
+            except OSError:
+                pass
+    return total
+
+
+def cmd_rm(args) -> int:
+    """Permanently delete specific sessions (their journals, clones, all of it).
+
+    This is the ONE destructive command in revertly, so it is loud about it:
+    it prints what each session is before asking, and tripwire-flagged
+    sessions require an extra --force.
+    """
+    missing = [s for s in args.sessions if not os.path.isdir(paths.session_dir(s))]
+    if missing:
+        print(f"revertly rm: unknown session(s): {', '.join(missing)}")
+        return 1
+    flagged = []
+    total = 0
+    for sid in args.sessions:
+        m = _load_meta(sid) or {}
+        trips = sum(1 for e in Journal.read(paths.journal_path(sid))
+                    if e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER))
+        size = _session_size(sid)
+        total += size
+        tag = f"  ⚠ {trips} tripwire event(s)" if trips else ""
+        print(f"  {sid}  ({m.get('name','?')})  {size/1e6:.1f} MB{tag}")
+        if trips:
+            flagged.append(sid)
+    if flagged and not args.force:
+        print("revertly rm: refusing to delete tripwire-flagged session(s) "
+              f"({', '.join(flagged)}) without --force — they may be evidence.")
+        return 1
+    if not args.yes:
+        resp = input(f"PERMANENTLY delete {len(args.sessions)} session(s), "
+                     f"{total/1e6:.1f} MB — no revert possible? [y/N] ").strip().lower()
+        if resp != "y":
+            print("aborted."); return 1
+    for sid in args.sessions:
+        paths.rmtree_force(paths.session_dir(sid))
+        print(f"deleted {sid}")
     return 0
 
 
@@ -129,17 +218,33 @@ def _read(path):
 
 def cmd_versions(args) -> int:
     # walk sessions newest->oldest, report which have a pre-image of this path
+    # and what each session actually DID to it (from its journal).
     target = os.path.abspath(args.path)
     print(f"versions of {target}:")
+    found = False
     for sid in paths.list_session_ids()[::-1]:
         m = _load_meta(sid) or {}
         cwd = m.get("cwd", "")
-        if not target.startswith(cwd):
+        prefix = cwd.rstrip(os.sep) + os.sep
+        if not cwd or not (target == cwd or target.startswith(prefix)):
             continue
         rel = os.path.relpath(target, cwd)
         blob = os.path.join(paths.clone_dir(sid), rel)
-        if os.path.exists(blob):
-            print(f"  {sid}  v0 (pre-image)  {blob}")
+        if not os.path.exists(blob):
+            continue
+        found = True
+        ops = sorted({e.op.value for e in Journal.read(paths.journal_path(sid))
+                      if e.kind == EventKind.FS and e.op and e.path
+                      and (e.path == target
+                           or e.path.startswith(target + os.sep))})
+        did = f"session {'/'.join(ops)}d it" if ops else "untouched in session"
+        print(f"  {sid}  v0 (pre-image)  [{did}]")
+        print(f"    view:    {blob}")
+        print(f"    restore: revertly revert {sid} {target}")
+    if not found:
+        print("  (no session holds a pre-image of this path — it may be "
+              "outside every session's project dir, or already GC'd)")
+        return 1
     return 0
 
 
@@ -376,6 +481,13 @@ def build_parser() -> argparse.ArgumentParser:
     lg.add_argument("--path")
     lg.set_defaults(func=cmd_log)
 
+    fd = sub.add_parser("find",
+                        help="search ALL sessions for a path (substring or glob)")
+    fd.add_argument("pattern")
+    fd.add_argument("--op", help="filter by op: write|create|delete|rename")
+    fd.add_argument("--since", help="only events newer than e.g. 7d or 12h")
+    fd.set_defaults(func=cmd_find)
+
     df = sub.add_parser("diff"); df.add_argument("session", nargs="?")
     df.add_argument("paths", nargs="*"); df.set_defaults(func=cmd_diff)
 
@@ -387,6 +499,14 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--dry-run", action="store_true")
     rv.add_argument("--force", action="store_true")
     rv.set_defaults(func=cmd_revert)
+
+    rm = sub.add_parser("rm",
+                        help="PERMANENTLY delete sessions from the store")
+    rm.add_argument("sessions", nargs="+")
+    rm.add_argument("--yes", "-y", action="store_true")
+    rm.add_argument("--force", action="store_true",
+                    help="allow deleting tripwire-flagged sessions")
+    rm.set_defaults(func=cmd_rm)
 
     ui = sub.add_parser("ui"); ui.add_argument("--port", type=int, default=0)
     ui.set_defaults(func=cmd_ui)

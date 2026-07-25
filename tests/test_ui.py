@@ -133,12 +133,14 @@ class TestHttpServer(_StoreFixture):
         status, ctype, body = self._get(path)
         return status, json.loads(body.decode("utf-8"))
 
-    def _post_json(self, path, payload):
+    def _post_json(self, path, payload, token=None):
         url = "http://127.0.0.1:%d%s" % (self.port, path)
         data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["X-Revertly-Token"] = token
         req = urllib.request.Request(
-            url, data=data, method="POST",
-            headers={"Content-Type": "application/json"})
+            url, data=data, method="POST", headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status, json.loads(resp.read().decode("utf-8"))
@@ -204,8 +206,109 @@ class TestHttpServer(_StoreFixture):
             # RevertPlan summary shape.
             self.assertIn("session_id", data)
             self.assertIn("summary", data)
+            self.assertIn("cli", data)
         else:
             self.assertIn("error", data)
+
+    # ── find across sessions ─────────────────────────────────────────
+
+    def test_api_find(self):
+        status, data = self._get_json("/api/find?q=app.py")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["session_id"], self.SESSION_ID)
+        self.assertEqual(data[0]["op"], "write")
+
+    def test_api_find_requires_q(self):
+        try:
+            urllib.request.urlopen(
+                "http://127.0.0.1:%d/api/find" % self.port, timeout=5)
+            self.fail("expected HTTPError")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+    # ── raw file view/download ───────────────────────────────────────
+
+    def test_api_file_pre_download(self):
+        import urllib.parse
+        q = urllib.parse.quote(self.changed_abs)
+        status, ctype, body = self._get(
+            "/api/session/%s/file?path=%s&which=pre" % (self.SESSION_ID, q))
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"line one\nline two\n")
+
+    def test_api_file_cur_download(self):
+        import urllib.parse
+        q = urllib.parse.quote(self.changed_abs)
+        status, ctype, body = self._get(
+            "/api/session/%s/file?path=%s&which=cur" % (self.SESSION_ID, q))
+        self.assertEqual(status, 200)
+        self.assertIn(b"line two changed", body)
+
+    def test_api_file_denies_escape(self):
+        import urllib.parse
+        outside = os.path.join(self.meta["cwd"], "..", "..", "etc", "passwd")
+        q = urllib.parse.quote(outside)
+        url = ("http://127.0.0.1:%d/api/session/%s/file?path=%s&which=pre"
+               % (self.port, self.SESSION_ID, q))
+        try:
+            urllib.request.urlopen(url, timeout=5)
+            self.fail("expected HTTPError")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+    # ── mutating actions need the per-run token ──────────────────────
+
+    def test_real_revert_requires_token(self):
+        status, data = self._post_json(
+            "/api/session/%s/revert" % self.SESSION_ID,
+            {"paths": [self.changed_abs], "dry_run": False})
+        self.assertEqual(status, 403)
+        self.assertIn("error", data)
+        # nothing was mutated
+        with open(self.changed_abs) as f:
+            self.assertIn("line two changed", f.read())
+
+    def test_real_revert_with_token_restores_file(self):
+        status, data = self._post_json(
+            "/api/session/%s/revert" % self.SESSION_ID,
+            {"paths": [self.changed_abs], "dry_run": False, "force": True},
+            token=server.ACTION_TOKEN)
+        self.assertEqual(status, 200)
+        self.assertTrue(data.get("revert_id"))
+        with open(self.changed_abs) as f:
+            self.assertEqual(f.read(), "line one\nline two\n")
+
+    def test_delete_session_requires_token(self):
+        status, data = self._post_json(
+            "/api/session/%s/delete" % self.SESSION_ID, {})
+        self.assertEqual(status, 403)
+        self.assertTrue(os.path.isdir(paths.session_dir(self.SESSION_ID)))
+
+    def test_delete_session_with_token(self):
+        status, data = self._post_json(
+            "/api/session/%s/delete" % self.SESSION_ID, {},
+            token=server.ACTION_TOKEN)
+        self.assertEqual(status, 200)
+        self.assertEqual(data["deleted"], self.SESSION_ID)
+        self.assertFalse(os.path.isdir(paths.session_dir(self.SESSION_ID)))
+
+    # ── DNS-rebinding guard ──────────────────────────────────────────
+
+    def test_non_loopback_host_rejected(self):
+        url = "http://127.0.0.1:%d/api/sessions" % self.port
+        req = urllib.request.Request(url, headers={"Host": "evil.example"})
+        try:
+            urllib.request.urlopen(req, timeout=5)
+            self.fail("expected HTTPError")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+
+    def test_token_injected_into_index(self):
+        status, ctype, body = self._get("/")
+        self.assertEqual(status, 200)
+        self.assertIn(server.ACTION_TOKEN.encode("ascii"), body)
+        self.assertNotIn(b"__REVERTLY_TOKEN__", body)
 
 
 if __name__ == "__main__":

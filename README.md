@@ -109,11 +109,14 @@ On exit you get one summary line, and everything stays revertible.
 ```
 revertly status                 armed? recent sessions, store location
 revertly last                   summary of the most recent session (+ integrity check)
-revertly log [session] [--tripwires] [--outside] [--tool Edit]
+revertly log [session] [--tripwires] [--outside] [--tool Edit] [--path X]
+revertly find <pattern> [--op delete] [--since 7d]
+                                search EVERY session — "what happened to X, when?"
 revertly diff [session] [path…] unified diff, pre-image vs current
-revertly versions <path>        which sessions hold a pre-image of this file
-revertly revert [session] [path…] [--dry-run] [--force] [--yes]
-revertly ui [--port N]          local control panel (timeline/diff/revert/live)
+revertly versions <path>        which sessions can restore this file, and what each did to it
+revertly revert [session] [path…|glob…] [--dry-run] [--force] [--yes]
+revertly rm <session…> [--force] PERMANENTLY delete sessions (the one destructive command)
+revertly ui [--port N]          control panel (timeline/find/diff/revert/live)
 revertly verify [session|--all] audit journal hash chains for tampering
 revertly gc [--keep 30]         prune old sessions (tripwire-flagged kept longest)
 revertly doctor                 health check incl. a security section
@@ -124,7 +127,15 @@ revertly install [--no-profile] | uninstall [--purge]
 Reverts are **preview-first** (plan printed, confirmation required),
 **conflict-aware** (files you changed *after* the session are flagged, shown as
 a 3-way decision, never silently clobbered), and **non-destructive** (every
-revert is itself a session — you can always undo the undo).
+revert is itself a session — you can always undo the undo). Revert paths
+accept **globs**: `revertly revert <session> '*.py'` restores every Python
+file the session touched.
+
+The `revertly ui` control panel can do all of it visually: filter sessions and
+events, **search every session** for a path (Find tab), view or download any
+pre-image, and **execute reverts** (preview → confirm; mutating actions are
+CSRF-token-guarded and the server rejects non-loopback hosts). Every UI action
+shows its equivalent CLI command.
 
 ## Security model — the honest version
 

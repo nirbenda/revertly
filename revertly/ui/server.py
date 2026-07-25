@@ -1,9 +1,17 @@
-"""revertly local control-panel HTTP server (read + revert-preview actions).
+"""revertly local control-panel HTTP server (read + preview + guarded actions).
 
 Stdlib only (http.server, json, urllib, difflib). Reads the FROZEN on-disk
 store directly via revertly.paths — never imports sibling worker modules for
 reads. The revert action imports revertly.revert lazily so the panel loads even
 if revert.py is briefly unavailable.
+
+Action security (this server can now MUTATE — execute reverts, delete
+sessions — so it defends the two classic localhost-panel holes):
+  * DNS-rebinding: every request's Host header must be a loopback name.
+  * CSRF: mutating requests (real revert, session delete) must carry the
+    per-run token in X-Revertly-Token. The token is minted at import time and
+    injected into index.html, which only a same-origin page can read.
+Dry-run previews and GETs stay tokenless — they change nothing.
 
 Store layout (frozen):
     <sessions_root>/<id>/meta.json          SessionMeta json
@@ -21,6 +29,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+import secrets
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -32,6 +41,23 @@ _INDEX_HTML = os.path.join(_HERE, "index.html")
 
 # fs-event ops that represent an actual on-disk mutation
 _MUTATING_OPS = ("write", "create", "delete", "rename")
+
+# Per-run action token (CSRF guard for mutating endpoints).
+ACTION_TOKEN = secrets.token_hex(16)
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
+
+
+def _host_is_loopback(host_header) -> bool:
+    """True if the Host header names a loopback address (DNS-rebind guard)."""
+    if not host_header:
+        return False
+    host = host_header.strip().lower()
+    if host.startswith("[") and "]" in host:      # [::1]:port
+        host = host[:host.index("]") + 1]
+    else:
+        host = host.rsplit(":", 1)[0]
+    return host in _LOOPBACK_HOSTS
 
 
 # ─────────────────────────── store readers ───────────────────────────
@@ -182,7 +208,48 @@ def build_diff(session_id: str, abs_path: str):
     }
 
 
-def run_revert(session_id: str, paths_list, dry_run: bool):
+def locate_file(session_id: str, abs_path: str, which: str):
+    """Resolve the on-disk location of a session file for view/download.
+
+    which='pre' -> the clone/ pre-image; which='cur' -> the live file.
+    Returns (real_path, filename) or (None, error_message). Both variants are
+    confined: pre must resolve inside clone/, cur inside the session cwd —
+    no `..`/symlink escape can read arbitrary files.
+    """
+    meta = _read_meta(session_id)
+    if meta is None:
+        return None, "unknown session: %s" % session_id
+    cwd = os.path.realpath(meta.get("cwd") or "")
+    norm_abs = os.path.realpath(os.path.normpath(abs_path))
+    prefix = cwd.rstrip(os.sep) + os.sep
+    if not (norm_abs == cwd or norm_abs.startswith(prefix)):
+        return None, "path is outside the session project dir"
+    rel = os.path.relpath(norm_abs, cwd)
+
+    if which == "pre":
+        root = os.path.realpath(paths.clone_dir(session_id))
+    elif which == "cur":
+        root = cwd
+    else:
+        return None, "which must be 'pre' or 'cur'"
+    candidate = os.path.realpath(os.path.join(root, rel))
+    if not (candidate == root or
+            candidate.startswith(root.rstrip(os.sep) + os.sep)):
+        return None, "path escapes the session root"
+    if not os.path.isfile(candidate):
+        return None, "no %s copy of %s" % (which, rel)
+    return candidate, os.path.basename(candidate)
+
+
+def delete_session(session_id: str):
+    """Permanently remove one session from the store. Returns (status, payload)."""
+    if _read_meta(session_id) is None:
+        return 404, {"error": "unknown session: %s" % session_id}
+    paths.rmtree_force(paths.session_dir(session_id))
+    return 200, {"deleted": session_id}
+
+
+def run_revert(session_id: str, paths_list, dry_run: bool, force: bool = False):
     """Lazily import revertly.revert and build a plan.
 
     Returns (status_code, payload_dict). In tests dry_run is always True so
@@ -202,7 +269,7 @@ def run_revert(session_id: str, paths_list, dry_run: bool):
             plan = _call_plan(reverter.plan_paths, sdir, list(paths_list))
         else:
             plan = _call_plan(reverter.plan, sdir)
-        revert_id = reverter.apply(plan, dry_run=dry_run)
+        revert_id = reverter.apply(plan, dry_run=dry_run, force=force)
     except Exception as e:  # keep the panel robust against revert internals
         return 500, {"error": "revert failed: %s: %s" % (type(e).__name__, e)}
 
@@ -218,6 +285,10 @@ def run_revert(session_id: str, paths_list, dry_run: bool):
     payload["summary"] = summ() if callable(summ) else str(summ)
     payload["is_clean"] = bool(getattr(plan, "is_clean", True))
     payload["revert_id"] = revert_id
+    # design rule: the UI shows the equivalent CLI for every action
+    payload["cli"] = "revertly revert %s %s%s" % (
+        session_id, " ".join(paths_list or []),
+        " --dry-run" if dry_run else " --yes")
     return 200, payload
 
 
@@ -292,8 +363,21 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status, message):
         self._send_json({"error": message}, status=status)
 
+    def _guard(self) -> bool:
+        """Reject non-loopback Host headers (DNS-rebinding). True = rejected."""
+        if not _host_is_loopback(self.headers.get("Host")):
+            self._error(403, "forbidden: non-loopback Host header")
+            return True
+        return False
+
+    def _has_token(self) -> bool:
+        tok = self.headers.get("X-Revertly-Token") or ""
+        return secrets.compare_digest(tok, ACTION_TOKEN)
+
     # -- routing --
     def do_GET(self):
+        if self._guard():
+            return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
@@ -302,14 +386,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_index()
         if path == "/api/sessions":
             return self._send_json(list_sessions())
+        if path == "/api/find":
+            return self._serve_find(query)
 
-        # /api/session/<id> and /api/session/<id>/diff
+        # /api/session/<id> and /api/session/<id>/{diff,file}
         prefix = "/api/session/"
         if path.startswith(prefix):
             rest = path[len(prefix):]
             if rest.endswith("/diff"):
                 sid = urllib.parse.unquote(rest[:-len("/diff")])
                 return self._serve_diff(sid, query)
+            if rest.endswith("/file"):
+                sid = urllib.parse.unquote(rest[:-len("/file")])
+                return self._serve_file(sid, query)
             sid = urllib.parse.unquote(rest)
             if sid and "/" not in sid:
                 data = load_session(sid)
@@ -320,22 +409,66 @@ class Handler(BaseHTTPRequestHandler):
         self._error(404, "not found: %s" % path)
 
     def do_POST(self):
+        if self._guard():
+            return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         prefix = "/api/session/"
-        suffix = "/revert"
-        if path.startswith(prefix) and path.endswith(suffix):
-            sid = urllib.parse.unquote(path[len(prefix):-len(suffix)])
+        if path.startswith(prefix) and path.endswith("/revert"):
+            sid = urllib.parse.unquote(path[len(prefix):-len("/revert")])
             return self._serve_revert(sid)
+        if path.startswith(prefix) and path.endswith("/delete"):
+            sid = urllib.parse.unquote(path[len(prefix):-len("/delete")])
+            return self._serve_delete(sid)
         self._error(404, "not found: %s" % path)
 
     # -- endpoint impls --
     def _serve_index(self):
         try:
             with open(_INDEX_HTML, "rb") as f:
-                self._send_html(f.read())
+                body = f.read()
         except OSError as e:
-            self._error(500, "cannot read index.html: %s" % e)
+            return self._error(500, "cannot read index.html: %s" % e)
+        body = body.replace(b"__REVERTLY_TOKEN__", ACTION_TOKEN.encode("ascii"))
+        self._send_html(body)
+
+    def _serve_find(self, query):
+        q = (query.get("q") or [""])[0]
+        if not q:
+            return self._error(400, "missing required query param: q")
+        op = (query.get("op") or [None])[0]
+        try:
+            from revertly.search import find_events  # lazy, guarded
+        except ImportError as e:
+            return self._error(501, "search unavailable: %s" % e)
+        self._send_json(find_events(q, op=op))
+
+    def _serve_file(self, sid, query):
+        path_vals = query.get("path")
+        if not path_vals or not path_vals[0]:
+            return self._error(400, "missing required query param: path")
+        which = (query.get("which") or ["pre"])[0]
+        located, name = locate_file(sid, path_vals[0], which)
+        if located is None:
+            return self._error(404, name)
+        try:
+            with open(located, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            return self._error(500, "cannot read file: %s" % e)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Disposition",
+                         'attachment; filename="%s.%s"' % (name, which))
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_delete(self, sid):
+        if not self._has_token():
+            return self._error(403, "missing or bad X-Revertly-Token")
+        status, payload = delete_session(sid)
+        self._send_json(payload, status=status)
 
     def _serve_diff(self, sid, query):
         path_vals = query.get("path")
@@ -359,7 +492,11 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(paths_list, list):
             return self._error(400, "'paths' must be a list")
         dry_run = bool(body.get("dry_run", True))
-        status, payload = run_revert(sid, paths_list, dry_run)
+        force = bool(body.get("force", False))
+        if not dry_run and not self._has_token():
+            # executing a real revert mutates the filesystem — token required
+            return self._error(403, "missing or bad X-Revertly-Token")
+        status, payload = run_revert(sid, paths_list, dry_run, force=force)
         self._send_json(payload, status=status)
 
 
