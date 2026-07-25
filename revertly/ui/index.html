@@ -1,0 +1,300 @@
+<!--
+  revertly control panel — single self-contained page.
+  Stdlib-served, no build step, no CDN, no third-party JS/CSS.
+  Marker string used by tests: "revertly control panel"
+-->
+<meta charset="utf-8">
+<title>revertly control panel</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --panel2: #232732;
+    --fg: #d6dae2; --muted: #8b93a3; --line: #2c313c;
+    --accent: #5aa9e6; --alert: #ff5c5c; --warn: #e6b45a; --ok: #5ae6a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header {
+    padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 14px;
+  }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .5px; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 4px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  nav button {
+    background: transparent; color: var(--muted); border: 0; padding: 7px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  nav button:hover { color: var(--fg); background: var(--panel2); }
+  nav button.active { color: var(--fg); background: var(--panel2); box-shadow: inset 0 -2px 0 var(--accent); }
+  main { padding: 16px 18px; max-width: 1100px; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; overflow: hidden; }
+  .row { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: var(--panel2); }
+  .row .name { font-weight: 600; }
+  .row .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; margin-left: 6px; }
+  .badge.trip { background: rgba(255,92,92,.18); color: var(--alert); }
+  .badge.out { background: rgba(230,180,90,.18); color: var(--warn); }
+  .badge.armed { background: rgba(90,230,160,.15); color: var(--ok); }
+  .badge.revert { background: rgba(90,169,230,.18); color: var(--accent); }
+  .events { background: var(--bg); border-top: 1px solid var(--line); }
+  .ev { padding: 6px 14px; border-bottom: 1px solid var(--line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; display: flex; gap: 10px; }
+  .ev:last-child { border-bottom: 0; }
+  .ev .k { color: var(--accent); min-width: 84px; }
+  .ev .p { color: var(--fg); word-break: break-all; }
+  .ev.flag { background: rgba(255,92,92,.10); }
+  .ev.flag .k { color: var(--alert); }
+  select, input[type=text], button.act {
+    background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 10px; font-size: 13px;
+  }
+  button.act { cursor: pointer; }
+  button.act:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #06121e; border-color: var(--accent); font-weight: 600; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  pre.diff { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  pre.diff .add { color: var(--ok); }
+  pre.diff .del { color: var(--alert); }
+  pre.diff .hd { color: var(--accent); }
+  .checkline { padding: 6px 14px; border-bottom: 1px solid var(--line); font-family: ui-monospace, monospace; font-size: 12px; }
+  .checkline:last-child { border-bottom: 0; }
+  .summary { margin-top: 12px; padding: 12px 14px; background: var(--panel2); border-radius: 8px; }
+  .cli { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; }
+  .empty { color: var(--muted); padding: 20px 0; }
+  label.chk { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+</style>
+
+<header>
+  <h1>revertly control panel</h1>
+  <span class="sub">local · offline · read + revert-preview over ~/.revertly</span>
+</header>
+
+<nav>
+  <button data-tab="timeline" class="active">Timeline</button>
+  <button data-tab="diff">Diff</button>
+  <button data-tab="revert">Revert</button>
+  <button data-tab="live">Live</button>
+</nav>
+
+<main>
+  <section id="tab-timeline" class="tab active">
+    <div class="toolbar">
+      <button class="act" id="tl-refresh">Refresh</button>
+      <span class="sub" id="tl-count"></span>
+    </div>
+    <div id="tl-list"></div>
+  </section>
+
+  <section id="tab-diff" class="tab">
+    <div class="toolbar">
+      <select id="diff-session"></select>
+      <select id="diff-path"></select>
+      <button class="act primary" id="diff-go">Show diff</button>
+    </div>
+    <pre class="diff" id="diff-out">Pick a session and a changed path.</pre>
+  </section>
+
+  <section id="tab-revert" class="tab">
+    <div class="toolbar">
+      <select id="rev-session"></select>
+      <button class="act primary" id="rev-preview">Preview revert (dry-run)</button>
+    </div>
+    <div class="card" id="rev-paths"></div>
+    <div class="summary" id="rev-summary" style="display:none"></div>
+  </section>
+
+  <section id="tab-live" class="tab">
+    <div class="toolbar">
+      <span class="sub">Polling /api/sessions every 2s</span>
+      <span class="sub" id="live-stamp"></span>
+    </div>
+    <div id="live-list"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+var API = "";
+function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+function getJSON(url) { return fetch(API + url).then(function(r){ return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; }); }); }
+function postJSON(url, payload) {
+  return fetch(API + url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; }); });
+}
+function fmtTime(t) { if (!t) return ""; try { return new Date(t * 1000).toLocaleString(); } catch (e) { return String(t); } }
+
+// ---- tabs ----
+var navButtons = document.querySelectorAll("nav button");
+navButtons.forEach(function(btn){
+  btn.addEventListener("click", function(){
+    navButtons.forEach(function(b){ b.classList.remove("active"); });
+    btn.classList.add("active");
+    document.querySelectorAll(".tab").forEach(function(t){ t.classList.remove("active"); });
+    document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "diff" || btn.dataset.tab === "revert") populateSessionPickers();
+  });
+});
+
+// ---- Timeline ----
+var FLAG_KINDS = { tripwire: 1, self_tamper: 1 };
+function eventIsFlagged(ev, cwd) {
+  if (FLAG_KINDS[ev.kind]) return true;
+  if (ev.severity === "alert" || ev.severity === "warn") return true;
+  if (ev.kind === "fs" && ev.path && cwd && ev.path.indexOf(cwd) !== 0) return true;
+  return false;
+}
+function renderTimeline(rows) {
+  var list = document.getElementById("tl-list");
+  list.innerHTML = "";
+  document.getElementById("tl-count").textContent = rows.length + " session(s)";
+  if (!rows.length) { list.appendChild(el("div", "empty", "No sessions yet.")); return; }
+  rows.forEach(function(s){
+    var card = el("div", "card");
+    var row = el("div", "row");
+    var name = el("div", "name"); name.textContent = s.name || s.id;
+    if (s.tripwire_count) name.appendChild(el("span", "badge trip", s.tripwire_count + " tripwire"));
+    if (s.outside_count) name.appendChild(el("span", "badge out", s.outside_count + " outside"));
+    if (s.armed) name.appendChild(el("span", "badge armed", "armed"));
+    if (s.is_revert) name.appendChild(el("span", "badge revert", "revert"));
+    row.appendChild(name);
+    row.appendChild(el("div", "meta", s.id + " · " + (s.cwd || "?") + " · " + s.event_count + " events · " + fmtTime(s.started)));
+    var ev = el("div", "events"); ev.style.display = "none";
+    row.addEventListener("click", function(){
+      if (ev.style.display === "none") {
+        if (!ev.dataset.loaded) {
+          getJSON("/api/session/" + encodeURIComponent(s.id)).then(function(res){
+            renderEvents(ev, res.body, s.cwd); ev.dataset.loaded = "1";
+          });
+        }
+        ev.style.display = "";
+      } else { ev.style.display = "none"; }
+    });
+    card.appendChild(row); card.appendChild(ev);
+    list.appendChild(card);
+  });
+}
+function renderEvents(container, data, cwd) {
+  container.innerHTML = "";
+  var events = (data && data.events) || [];
+  if (!events.length) { container.appendChild(el("div", "empty", "No events.")); return; }
+  events.forEach(function(ev){
+    var line = el("div", "ev" + (eventIsFlagged(ev, cwd) ? " flag" : ""));
+    line.appendChild(el("span", "k", ev.kind + (ev.op ? "/" + ev.op : "")));
+    var label = ev.path || ev.target || ev.tool || ev.detail || "";
+    line.appendChild(el("span", "p", label));
+    container.appendChild(line);
+  });
+}
+function loadTimeline() { getJSON("/api/sessions").then(function(res){ renderTimeline(res.body || []); }); }
+document.getElementById("tl-refresh").addEventListener("click", loadTimeline);
+
+// ---- session pickers (shared by Diff + Revert) ----
+var sessionCache = [];
+function populateSessionPickers() {
+  getJSON("/api/sessions").then(function(res){
+    sessionCache = res.body || [];
+    [document.getElementById("diff-session"), document.getElementById("rev-session")].forEach(function(sel){
+      var prev = sel.value; sel.innerHTML = "";
+      sessionCache.forEach(function(s){ var o = el("option"); o.value = s.id; o.textContent = (s.name || s.id); sel.appendChild(o); });
+      if (prev) sel.value = prev;
+    });
+    loadDiffPaths(); loadRevertPaths();
+  });
+}
+function changedPathsFor(sessionId, cb) {
+  getJSON("/api/session/" + encodeURIComponent(sessionId)).then(function(res){
+    var seen = {}, out = [];
+    ((res.body && res.body.events) || []).forEach(function(ev){
+      if (ev.kind === "fs" && ev.path && !seen[ev.path]) { seen[ev.path] = 1; out.push(ev.path); }
+    });
+    cb(out);
+  });
+}
+
+// ---- Diff ----
+function loadDiffPaths() {
+  var sel = document.getElementById("diff-session"); if (!sel.value) return;
+  changedPathsFor(sel.value, function(paths){
+    var ps = document.getElementById("diff-path"); ps.innerHTML = "";
+    paths.forEach(function(p){ var o = el("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
+  });
+}
+document.getElementById("diff-session").addEventListener("change", loadDiffPaths);
+document.getElementById("diff-go").addEventListener("click", function(){
+  var sid = document.getElementById("diff-session").value;
+  var path = document.getElementById("diff-path").value;
+  if (!sid || !path) return;
+  getJSON("/api/session/" + encodeURIComponent(sid) + "/diff?path=" + encodeURIComponent(path)).then(function(res){
+    var out = document.getElementById("diff-out"); out.innerHTML = "";
+    if (!res.ok) { out.textContent = (res.body && res.body.error) || "error"; return; }
+    var d = res.body.diff || "(no differences)";
+    d.split("\n").forEach(function(line){
+      var cls = "";
+      if (line[0] === "+") cls = "add"; else if (line[0] === "-") cls = "del";
+      else if (line[0] === "@") cls = "hd";
+      var span = el("span", cls, line + "\n"); out.appendChild(span);
+    });
+  });
+});
+
+// ---- Revert composer ----
+function loadRevertPaths() {
+  var sel = document.getElementById("rev-session"); if (!sel.value) return;
+  changedPathsFor(sel.value, function(paths){
+    var box = document.getElementById("rev-paths"); box.innerHTML = "";
+    if (!paths.length) { box.appendChild(el("div", "empty", "No changed paths.")); return; }
+    paths.forEach(function(p){
+      var line = el("div", "checkline");
+      var lab = el("label", "chk");
+      var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = p; cb.checked = true;
+      lab.appendChild(cb); lab.appendChild(el("span", null, p));
+      line.appendChild(lab); box.appendChild(line);
+    });
+  });
+}
+document.getElementById("rev-session").addEventListener("change", loadRevertPaths);
+document.getElementById("rev-preview").addEventListener("click", function(){
+  var sid = document.getElementById("rev-session").value; if (!sid) return;
+  var checks = document.querySelectorAll("#rev-paths input[type=checkbox]");
+  var paths = []; checks.forEach(function(c){ if (c.checked) paths.push(c.value); });
+  var summ = document.getElementById("rev-summary");
+  summ.style.display = ""; summ.textContent = "Previewing…";
+  postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: paths, dry_run: true }).then(function(res){
+    summ.innerHTML = "";
+    if (res.status === 501) { summ.appendChild(el("div", null, "Revert engine unavailable (501). " + ((res.body && res.body.error) || ""))); return; }
+    if (!res.ok) { summ.appendChild(el("div", null, (res.body && res.body.error) || ("error " + res.status))); return; }
+    var b = res.body;
+    summ.appendChild(el("div", "name", "Dry-run plan: " + (b.summary || "")));
+    summ.appendChild(el("div", "cli", "$ revertly revert " + sid + " " + paths.join(" ") + "   # dry-run"));
+  });
+});
+
+// ---- Live ----
+function renderLive(rows) {
+  var list = document.getElementById("live-list"); list.innerHTML = "";
+  document.getElementById("live-stamp").textContent = "updated " + new Date().toLocaleTimeString();
+  if (!rows.length) { list.appendChild(el("div", "empty", "No sessions.")); return; }
+  rows.forEach(function(s){
+    var card = el("div", "card"); var row = el("div", "row");
+    var name = el("div", "name"); name.textContent = s.name || s.id;
+    if (!s.ended) name.appendChild(el("span", "badge armed", "running"));
+    if (s.tripwire_count) name.appendChild(el("span", "badge trip", s.tripwire_count + " tripwire"));
+    if (s.outside_count) name.appendChild(el("span", "badge out", s.outside_count + " outside"));
+    row.appendChild(name);
+    row.appendChild(el("div", "meta", s.event_count + " events · " + (s.cwd || "?")));
+    card.appendChild(row); list.appendChild(card);
+  });
+}
+var liveTimer = null;
+function pollLive() { getJSON("/api/sessions").then(function(res){ renderLive(res.body || []); }); }
+setInterval(function(){ if (document.getElementById("tab-live").classList.contains("active")) pollLive(); }, 2000);
+
+// boot
+loadTimeline();
+</script>

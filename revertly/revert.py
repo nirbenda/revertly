@@ -1,0 +1,299 @@
+"""revertly revert engine — plan()/apply() over a session pre-image.
+
+The crown jewel. Upholds two invariants (TECH-DESIGN.md):
+
+  #3 Non-destructive: apply() ALWAYS captures the current on-disk state of
+     every path it is about to touch into a fresh revert-session (with its
+     own clone/) BEFORE mutating anything. A revert can therefore itself be
+     reverted — there is no revertly operation that loses data.
+
+  #4 Conflict safety: a path that changed *after* the reverted session ended
+     is a Conflict. Conflicts are surfaced in plan.conflicts and are NEVER
+     silently overwritten by apply(); they are skipped unless force=True.
+
+Model of the world
+-------------------
+A session dir holds meta.json (SessionMeta, with `cwd` and `ended`) and a
+`clone/` directory that is the CoW PRE-IMAGE of `cwd` at session start.
+Reverting means comparing that pre-image against the CURRENT cwd:
+
+  * present in clone, differs in cwd  -> MODIFIED -> restore pre-image bytes
+  * present in clone, absent from cwd -> DELETED  -> recreate from pre-image
+  * absent in clone, present in cwd   -> CREATED  -> delete from cwd
+  * identical                         -> no change
+
+Conflict rule (Phase 1, deliberately simple)
+--------------------------------------------
+A restore/delete target is a Conflict when the current file's mtime is
+strictly greater than meta.ended — i.e. the user (or another session) kept
+working on that path after this session sealed. That applies to:
+  * a MODIFIED restore target whose current mtime > ended, and
+  * a CREATED delete target whose current mtime > ended.
+DELETED targets (absent from cwd) have no current file to have diverged, so
+they never conflict. Conflicts are listed in plan.conflicts and skipped by
+apply() unless force=True.
+
+Python 3.9 stdlib only.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+from typing import List, Optional
+
+from revertly import paths
+from revertly.model import (
+    Change,
+    ChangeType,
+    Conflict,
+    RevertPlan,
+    SessionMeta,
+)
+
+
+def _read_bytes(path: str) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _digest(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _same_content(a: str, b: str) -> bool:
+    """True if files a and b have identical content (size then hash)."""
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+    except OSError:
+        return False
+    return _digest(a) == _digest(b)
+
+
+def _walk_rel(root: str) -> List[str]:
+    """Sorted list of file paths under root, relative to root (posix-ish)."""
+    out = []
+    for dirpath, _dirs, files in os.walk(root):
+        for fn in files:
+            full = os.path.join(dirpath, fn)
+            out.append(os.path.relpath(full, root))
+    out.sort()
+    return out
+
+
+class Reverter:
+    """Plans and applies a revert for one session directory."""
+
+    def __init__(self, session_dir: str):
+        self.session_dir = os.path.abspath(session_dir)
+        self.session_id = os.path.basename(self.session_dir.rstrip(os.sep))
+        self.meta = self._load_meta()
+        self.cwd = os.path.abspath(self.meta.cwd)
+        self.clone = self.meta.clone_path or os.path.join(self.session_dir, "clone")
+        self.clone = os.path.abspath(self.clone)
+        # sessions sealed without an explicit end time never trip the
+        # "modified after end" conflict rule.
+        self.ended = self.meta.ended if self.meta.ended is not None else float("inf")
+
+    # ── loading ────────────────────────────────────────────────────────
+    def _load_meta(self) -> SessionMeta:
+        with open(os.path.join(self.session_dir, "meta.json")) as f:
+            return SessionMeta.from_json_dict(json.load(f))
+
+    # ── planning ───────────────────────────────────────────────────────
+    def plan(self) -> RevertPlan:
+        """Full-session revert: classify every differing path."""
+        return self._build_plan(path_filter=None)
+
+    def plan_paths(self, paths_arg: List[str]) -> RevertPlan:
+        """Revert restricted to the given files/dirs.
+
+        Each entry may be absolute or relative to cwd. A directory includes
+        everything beneath it.
+        """
+        prefixes = [self._normalize(p) for p in paths_arg]
+
+        def keep(abs_path: str) -> bool:
+            for pre in prefixes:
+                if abs_path == pre:
+                    return True
+                if abs_path.startswith(pre + os.sep):
+                    return True
+            return False
+
+        return self._build_plan(path_filter=keep)
+
+    def _normalize(self, p: str) -> str:
+        if not os.path.isabs(p):
+            p = os.path.join(self.cwd, p)
+        return os.path.abspath(p)
+
+    def _build_plan(self, path_filter) -> RevertPlan:
+        plan = RevertPlan(session_id=self.session_id)
+
+        clone_rels = set(_walk_rel(self.clone)) if os.path.isdir(self.clone) else set()
+        cwd_rels = set(_walk_rel(self.cwd)) if os.path.isdir(self.cwd) else set()
+
+        for rel in sorted(clone_rels | cwd_rels):
+            abs_path = os.path.join(self.cwd, rel)
+            if path_filter is not None and not path_filter(abs_path):
+                continue
+
+            clone_path = os.path.join(self.clone, rel)
+            in_clone = rel in clone_rels
+            in_cwd = rel in cwd_rels
+
+            if in_clone and in_cwd:
+                if _same_content(clone_path, abs_path):
+                    continue  # unchanged
+                # MODIFIED — restore pre-image
+                change = Change(path=abs_path, change_type=ChangeType.MODIFIED,
+                                pre_blob=clone_path)
+                if self._diverged(abs_path):
+                    plan.conflicts.append(
+                        Conflict(path=abs_path,
+                                 reason="modified after session ended"))
+                plan.restores.append(change)
+            elif in_clone and not in_cwd:
+                # DELETED — recreate from pre-image. No current file to diverge.
+                plan.restores.append(
+                    Change(path=abs_path, change_type=ChangeType.DELETED,
+                           pre_blob=clone_path))
+            else:  # in_cwd and not in_clone
+                # CREATED — delete it.
+                change = Change(path=abs_path, change_type=ChangeType.CREATED,
+                                pre_blob=None)
+                if self._diverged(abs_path):
+                    plan.conflicts.append(
+                        Conflict(path=abs_path,
+                                 reason="created file modified after session ended"))
+                plan.deletes.append(change)
+
+        return plan
+
+    def _diverged(self, abs_path: str) -> bool:
+        """True if abs_path's current mtime is strictly after meta.ended."""
+        try:
+            return os.path.getmtime(abs_path) > self.ended
+        except OSError:
+            return False
+
+    # ── applying ───────────────────────────────────────────────────────
+    def apply(self, plan: RevertPlan, *, dry_run: bool = False,
+              force: bool = False) -> Optional[str]:
+        """Apply a revert plan, non-destructively.
+
+        Steps:
+          1. Determine which changes are actually actionable (conflicts are
+             skipped unless force=True).
+          2. Capture the CURRENT bytes of every path we will touch into a new
+             revert-session (is_revert=True, reverts_session=<this id>) with
+             its own clone/, so this revert can itself be reverted.
+          3. Restore MODIFIED/DELETED targets from their pre_blob; delete
+             CREATED targets.
+
+        dry_run=True performs no capture and no mutation; it returns the id
+        that *would* have been minted (its dir is never created), or None if
+        there is nothing to do.
+
+        Returns the new revert-session id, or None if nothing was applied.
+        """
+        conflict_paths = {c.path for c in plan.conflicts}
+
+        def actionable(change: Change) -> bool:
+            if force:
+                return True
+            return change.path not in conflict_paths
+
+        restores = [c for c in plan.restores if actionable(c)]
+        deletes = [c for c in plan.deletes if actionable(c)]
+
+        if not restores and not deletes:
+            return None
+
+        revert_id = paths.new_session_id("revert")
+
+        if dry_run:
+            return revert_id
+
+        # 2. capture current state of every affected path into revert-session.
+        self._capture(revert_id, restores, deletes)
+
+        # 3. mutate.
+        for change in restores:
+            self._restore(change)
+        for change in deletes:
+            self._delete(change)
+
+        return revert_id
+
+    def _capture(self, revert_id: str, restores: List[Change],
+                 deletes: List[Change]) -> None:
+        """Build the revert-session dir: meta.json + clone/ of current bytes.
+
+        The new clone/ mirrors the reverted session's layout: it is keyed on
+        paths relative to cwd, so a Reverter constructed on the revert-session
+        will compare that captured pre-image against cwd exactly the same way.
+        """
+        r_session_dir = paths.session_dir(revert_id)
+        r_clone = paths.clone_dir(revert_id)
+        paths.ensure_dir(r_clone)
+
+        # Every path the revert touches: capture its CURRENT on-disk bytes.
+        # For CREATED files (which currently exist) and MODIFIED files, this
+        # records the post-session content so revert-the-revert can restore it.
+        # DELETED targets have no current file — nothing to capture, and their
+        # absence in the capture clone means revert-the-revert will re-delete.
+        for change in list(restores) + list(deletes):
+            src = change.path
+            if not os.path.isfile(src):
+                continue
+            rel = os.path.relpath(src, self.cwd)
+            dst = os.path.join(r_clone, rel)
+            os.makedirs(os.path.dirname(dst) or r_clone, exist_ok=True)
+            shutil.copy2(src, dst)
+
+        meta = SessionMeta(
+            id=revert_id,
+            name="revert of %s" % self.session_id,
+            cwd=self.cwd,
+            argv=["revertly", "revert", self.session_id],
+            started=self.meta.ended if self.meta.ended is not None else 0.0,
+            ended=os.path.getmtime(r_clone) if os.path.exists(r_clone) else None,
+            clone_path=r_clone,
+            armed=True,
+            is_revert=True,
+            reverts_session=self.session_id,
+        )
+        # Set ended to "now-ish" via the clone dir mtime so the revert-session's
+        # own conflict rule behaves; fall back handled above.
+        with open(paths.meta_path(revert_id), "w") as f:
+            json.dump(meta.to_json_dict(), f)
+
+    def _restore(self, change: Change) -> None:
+        """Restore MODIFIED/DELETED target from its pre-image bytes."""
+        assert change.pre_blob is not None
+        dst = change.path
+        os.makedirs(os.path.dirname(dst) or self.cwd, exist_ok=True)
+        shutil.copy2(change.pre_blob, dst)
+
+    def _delete(self, change: Change) -> None:
+        """Delete a CREATED target from cwd."""
+        try:
+            os.remove(change.path)
+        except FileNotFoundError:
+            pass
+        # prune now-empty parent dirs up to (but not including) cwd
+        parent = os.path.dirname(change.path)
+        while parent and os.path.abspath(parent) != self.cwd:
+            try:
+                os.rmdir(parent)
+            except OSError:
+                break
+            parent = os.path.dirname(parent)
