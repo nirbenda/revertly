@@ -93,6 +93,33 @@ class TestOrdinaryTripwire(unittest.TestCase):
         hit = self.engine.check(home(".ssh", "id_rsa"), FsOp.READ)
         self.assertIn(hit.pattern, Config().tripwire_globs_all())
 
+    def test_env_family_all_trip(self):
+        # the whole .env family — not just the bare name — must fire (the
+        # .local/.production variants are where secrets actually live).
+        for name in (".env", ".env.local", ".env.production", ".env.development",
+                     "secrets.env"):
+            hit = self.engine.check(home("prj", "app", name), FsOp.WRITE)
+            self.assertIsNotNone(hit, f"{name} should trip")
+            self.assertFalse(hit.self_tamper)
+
+
+class TestExcludeGlobs(unittest.TestCase):
+    def test_directory_itself_is_excluded(self):
+        # regression (H4): `**/node_modules/**` must match the DIRECTORY too,
+        # or the watcher never prunes it and descends every poll.
+        cfg = Config()
+        for d in ("/proj/node_modules", "/proj/.git", "/proj/src/.claude"):
+            self.assertTrue(cfg.is_excluded(d), f"{d} dir should be excluded")
+
+    def test_git_and_claude_excluded(self):
+        cfg = Config()
+        self.assertTrue(cfg.is_excluded("/proj/.git/refs/main"))
+        self.assertTrue(cfg.is_excluded("/proj/.claude/settings.json"))
+
+    def test_source_file_not_excluded(self):
+        cfg = Config()
+        self.assertFalse(cfg.is_excluded("/proj/src/app.py"))
+
 
 class TestNoHit(unittest.TestCase):
     def setUp(self):

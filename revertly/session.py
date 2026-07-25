@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from typing import Optional
 
@@ -46,6 +47,7 @@ class Session:
         paths.ensure_store()
         sdir = paths.ensure_dir(paths.session_dir(self.id))
         paths.ensure_dir(paths.versions_dir(self.id))
+        self._warn_if_blinded()
 
         snapshotter = self._snapshotter or _default_snapshotter()
         cloner = self._cloner or _default_cloner()
@@ -56,6 +58,7 @@ class Session:
             if snapshotter.can_snapshot():
                 snap_name = snapshotter.create()
             cloner.clone_tree(self.cwd, paths.clone_dir(self.id))
+            self._prune_clone(paths.clone_dir(self.id))
             clone_ok = True
         except Exception as exc:  # arming failed
             self._handle_arm_failure(exc)
@@ -86,6 +89,44 @@ class Session:
         )
         self._save_meta()
         return self.meta
+
+    def _prune_clone(self, clone_root: str) -> None:
+        """Remove excluded paths (node_modules, .git, .claude, venvs, caches)
+        from the freshly-made clone, keyed on the LOGICAL project path so the
+        store isn't bloated with regenerable trees and the pre-image never
+        includes anything the watcher also ignores (keeping revert consistent).
+        On APFS the clone is CoW so this is cheap; it also bounds the non-APFS
+        full-copy footprint."""
+        for dirpath, dirnames, filenames in os.walk(clone_root, topdown=True):
+            rel = os.path.relpath(dirpath, clone_root)
+            base = self.cwd if rel == "." else os.path.join(self.cwd, rel)
+            keep = []
+            for d in dirnames:
+                if self.cfg.is_excluded(os.path.join(base, d)):
+                    shutil.rmtree(os.path.join(dirpath, d), ignore_errors=True)
+                else:
+                    keep.append(d)
+            dirnames[:] = keep
+            for fn in filenames:
+                if self.cfg.is_excluded(os.path.join(base, fn)):
+                    try:
+                        os.remove(os.path.join(dirpath, fn))
+                    except OSError:
+                        pass
+
+    def _warn_if_blinded(self) -> None:
+        """A config that broadens exclude to everything or empties the tripwire
+        set means the watcher is blind — announce it at arm time (was only
+        surfaced by a manual `revertly doctor`)."""
+        risky = self.cfg.risky_excludes()
+        if risky:
+            msg = f"config exclude is dangerously broad {risky} — watcher blinded"
+            print(f"revertly ⚠ {msg}", file=__import__("sys").stderr)
+            paths.append_incident("CONFIG", msg)
+        if self.cfg.tripwires_weakened():
+            msg = "sensitive-path tripwires are EMPTY in config"
+            print(f"revertly ⚠ {msg}", file=__import__("sys").stderr)
+            paths.append_incident("CONFIG", msg)
 
     def _resolve_scope(self) -> str:
         scope = self.cfg.watch_scope

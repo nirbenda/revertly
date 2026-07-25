@@ -21,15 +21,25 @@ SELF_TAMPER_GLOBS = [
 ]
 
 # Default sensitive-path tripwires (credentials, persistence, system).
+# The .env FAMILY is covered, not just the bare name: `.env.local`,
+# `.env.production`, `secrets.env`, etc. are exactly where secrets hide.
 DEFAULT_TRIPWIRE_GLOBS = [
     "~/.ssh/**", "~/.aws/**", "~/.config/gh/**", "~/.gnupg/**",
     "~/Library/LaunchAgents/**", "~/Library/LaunchDaemons/**",
-    "/etc/**", "**/id_rsa*", "**/id_ed25519*", "**/*.pem", "**/.env",
+    "/etc/**", "**/id_rsa*", "**/id_ed25519*", "**/*.pem",
+    "**/.env", "**/.env.*", "**/*.env", "**/.npmrc", "**/.pypirc",
 ]
 
+# Excluded from BOTH the watcher and the clone (see Session.arm clone prune).
+#   * .git — reverting git internals (refs/index) can corrupt the repo or
+#     un-commit work; every git op would also spam the journal. Leave it to git.
+#   * .claude — the agent's own workspace/session state; not ours to revert.
+#   * node_modules / venvs / caches — huge, regenerable, not worth cloning.
 DEFAULT_EXCLUDE_GLOBS = [
-    "~/Library/Caches/**", "~/.revertly/**", "**/node_modules/**",
-    "**/.git/objects/**", "**/.DS_Store", "**/__pycache__/**",
+    "~/Library/Caches/**", "~/.revertly/**",
+    "**/node_modules/**", "**/.git/**", "**/.claude/**",
+    "**/.venv/**", "**/venv/**",
+    "**/.DS_Store", "**/__pycache__/**", "**/*.pyc",
 ]
 
 
@@ -100,11 +110,15 @@ def match_glob(path: str, globs: list):
         gn = os.path.normpath(g)
         if fnmatch.fnmatch(norm, gn):
             return g
-        # `**` handling: fnmatch treats * as not crossing... it actually does
-        # cross '/', so also try a prefix match for trailing /** patterns.
+        # `foo/**` (or `**/foo/**`) must also match the DIRECTORY `foo` itself,
+        # not only paths beneath it — otherwise the watcher never prunes the
+        # dir and descends into node_modules/.git on every poll. Match `norm`
+        # against the base (with /** stripped); fnmatch's `**`→`.*` crosses '/'
+        # so `**/node_modules` matches `/proj/node_modules`.
         if gn.endswith(os.sep + "**"):
-            base = gn[: -3]
-            if norm == base or norm.startswith(base + os.sep):
+            base = gn[:-3]
+            if (norm == base or norm.startswith(base + os.sep)
+                    or fnmatch.fnmatch(norm, base)):
                 return g
         if "**" in gn:
             # collapse ** to * for a looser secondary attempt

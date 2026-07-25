@@ -71,6 +71,24 @@ class TestArmSeal(SessionBase):
         self.assertEqual(ctx.exception.policy, "abort")
 
 
+class TestCloneExcludes(SessionBase):
+    def test_excluded_trees_not_cloned(self):
+        # .git, .claude, node_modules must NOT land in the pre-image (H2).
+        for rel in (".git/refs/main", ".claude/settings.json",
+                    "node_modules/pkg/i.js", "src/app.py"):
+            p = os.path.join(self._proj.name, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as f:
+                f.write("x")
+        s = self._mk()
+        s.arm()
+        clone = paths.clone_dir(s.id)
+        self.assertTrue(os.path.exists(os.path.join(clone, "src", "app.py")))
+        self.assertFalse(os.path.exists(os.path.join(clone, ".git")))
+        self.assertFalse(os.path.exists(os.path.join(clone, ".claude")))
+        self.assertFalse(os.path.exists(os.path.join(clone, "node_modules")))
+
+
 class TestStoreHardening(SessionBase):
     def test_store_root_is_0700(self):
         del os.environ["REVERTLY_NO_HARDEN"]      # exercise real hardening
