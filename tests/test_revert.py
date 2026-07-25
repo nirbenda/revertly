@@ -550,6 +550,19 @@ class TestMoveChainRobustness(RevertTestCase):
         self.assertFalse(os.path.islink(self._abs("f.txt")))
         self.assertEqual(self.fx.read_project("f.txt"), b"original")
 
+    def test_deleted_target_replaced_by_symlink_conflicts(self):
+        # session deleted f.txt; a LATER session put a symlink at that path.
+        # Restoring must flag a conflict, not silently clobber the symlink.
+        victim = os.path.join(self.fx.home, "victim.txt")
+        with open(victim, "w") as f:
+            f.write("precious")
+        self.fx.clone_only("f.txt", "original")   # in pre-image, deleted in cwd
+        self.fx.finalize()
+        os.symlink(victim, self._abs("f.txt"))     # later replacement
+        plan = Reverter(paths.session_dir(self.fx.sid)).plan()
+        self.assertTrue(any(c.path == self._abs("f.txt") for c in plan.conflicts),
+                        "symlink now occupying a deleted path must conflict")
+
     def test_fifo_in_project_does_not_hang(self):
         # a FIFO must be skipped, not opened (opening blocks forever) (H6).
         self.fx.seed("real.txt", "data")

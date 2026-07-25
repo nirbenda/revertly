@@ -314,10 +314,18 @@ class Reverter:
                                  reason="modified after session ended"))
                 plan.restores.append(change)
             elif in_clone and not in_cwd:
-                # DELETED — recreate from pre-image. No current file to diverge.
-                plan.restores.append(
-                    Change(path=abs_path, change_type=ChangeType.DELETED,
-                           pre_blob=clone_path))
+                # DELETED — recreate from pre-image. `in_cwd` only counts
+                # REGULAR files, so a symlink/dir now occupying this path would
+                # be silently clobbered by the restore. If something non-regular
+                # is there (a later session replaced the file), flag a conflict.
+                change = Change(path=abs_path, change_type=ChangeType.DELETED,
+                                pre_blob=clone_path)
+                if os.path.lexists(abs_path):
+                    plan.conflicts.append(
+                        Conflict(path=abs_path,
+                                 reason="path now occupied by a symlink/dir "
+                                        "(replaced after the session)"))
+                plan.restores.append(change)
             else:  # in_cwd and not in_clone
                 # CREATED — delete it.
                 change = Change(path=abs_path, change_type=ChangeType.CREATED,

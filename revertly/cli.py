@@ -121,7 +121,7 @@ def _print_session(sid) -> int:
     fs = [e for e in events if e.kind == EventKind.FS]
     trips = [e for e in events if e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER)]
     cwd = m.get("cwd", "")
-    outside = [e for e in fs if e.path and not e.path.startswith(cwd)]
+    outside = [e for e in fs if e.path and not paths.is_under(e.path, cwd)]
     print(f"session {sid}  ({m.get('name','?')})")
     print(f"  cwd={cwd}  armed={m.get('armed')}  exit={m.get('exit_code')}")
     print(f"  {len(fs)} fs changes, {len(outside)} outside project, {len(trips)} tripwire(s)")
@@ -145,7 +145,7 @@ def cmd_log(args) -> int:
     for e in events:
         if args.tripwires and e.kind not in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER):
             continue
-        if args.outside and (not e.path or e.path.startswith(cwd)):
+        if args.outside and (not e.path or paths.is_under(e.path, cwd)):
             continue
         if args.tool and e.tool != args.tool:
             continue

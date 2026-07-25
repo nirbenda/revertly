@@ -187,7 +187,7 @@ class Session:
                      ".bashrc", ".bash_profile", ".profile")}
         for root, allow in ((home, store_allow), (userhome, rc_allow)):
             if os.path.isdir(root):
-                w = _make_allowlist_watcher(allow)
+                w = _make_allowlist_watcher(allow, self.cfg.poll_interval)
                 w.start(root, self._on_event)
                 started.append(w)
         return started
@@ -311,7 +311,7 @@ class Session:
         events = Journal.read(paths.journal_path(self.id))
         fs = [e for e in events if e.kind == EventKind.FS]
         trips = [e for e in events if e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER)]
-        outside = [e for e in fs if e.path and not e.path.startswith(self.cwd)]
+        outside = [e for e in fs if e.path and not paths.is_under(e.path, self.cwd)]
         parts = [f"{len(fs)} files touched"]
         if outside:
             parts.append(f"{len(outside)} outside project ⚠")
@@ -371,7 +371,7 @@ def _make_plain_watcher(cfg: Config):
     return PollingWatcher(interval=cfg.poll_interval)
 
 
-def _make_allowlist_watcher(allowed: set):
+def _make_allowlist_watcher(allowed: set, interval: float = 0.5):
     """A watcher that prunes ALL subdirectories (no descent) and reports only
     the explicit sentinel files in `allowed`. Cheap: one listing of the root,
     stat of a handful of files. Used for the store root (config.toml, paused)
@@ -385,4 +385,4 @@ def _make_allowlist_watcher(allowed: set):
         if os.path.isdir(ap):
             return True                    # never descend
         return ap not in allowed           # only the sentinels are reported
-    return PollingWatcher(interval=0.5, should_ignore=ignore)
+    return PollingWatcher(interval=interval, should_ignore=ignore)
