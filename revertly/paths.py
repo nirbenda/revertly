@@ -100,14 +100,16 @@ def ensure_store() -> None:
         pass
 
 
-def append_incident(tag: str, detail: str) -> None:
+def append_incident(tag: str, detail: str, session_id: str = "-") -> None:
     """Append a line to the cross-session incident log. Used for tripwire
     hits AND for destructive/disable actions (rm, gc, purge, pause, disable)
-    so they can never happen silently. Best-effort; never raises."""
+    so they can never happen silently. One 4-column schema everywhere:
+    `timestamp \\t session \\t tag \\t detail`. Best-effort; never raises."""
     import time as _time
     try:
         ensure_store()
-        line = f"{_time.strftime('%Y-%m-%dT%H:%M:%S')}\t-\t{tag}\t{detail}\n"
+        line = (f"{_time.strftime('%Y-%m-%dT%H:%M:%S')}\t{session_id}\t"
+                f"{tag}\t{detail}\n")
         with open(incidents_log(), "a") as f:
             f.write(line)
     except OSError:

@@ -36,6 +36,15 @@ def _resolve_session(arg: Optional[str]) -> Optional[str]:
     return paths.latest_session_id()
 
 
+def _days_type(s):
+    """argparse type: accept 7 or '7d' or '4w' as a day count."""
+    from .config import parse_days
+    d = parse_days(s)
+    if d is None:
+        raise argparse.ArgumentTypeError(f"expected a day count like 7 or 7d, got {s!r}")
+    return d
+
+
 def _confirm(prompt: str) -> bool:
     """y/N prompt that treats a closed/non-TTY stdin as 'no', not a crash."""
     try:
@@ -831,8 +840,8 @@ def build_parser() -> argparse.ArgumentParser:
                    ).set_defaults(func=cmd_resume)
 
     gc = sub.add_parser("gc", help="enforce retention policy (age + disk cap)")
-    gc.add_argument("--keep", type=int, default=None,
-                    help="keep sessions ≤ N days (default: config retention_days, 30)")
+    gc.add_argument("--keep", type=_days_type, default=None,
+                    help="keep sessions ≤ N days, e.g. 7 or 7d (default: config retention_days)")
     gc.add_argument("--before", help="also prune before a session id / 7d / YYYY-MM-DD")
     gc.set_defaults(func=cmd_gc)
 
@@ -851,7 +860,7 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--all", action="store_true",
                     help="clear ALL sessions (keeps the live one)")
     cl.add_argument("--before", help="clear before a session id / 7d / YYYY-MM-DD")
-    cl.add_argument("--keep", type=int, help="clear everything older than N days")
+    cl.add_argument("--keep", type=_days_type, help="clear everything older than N days (e.g. 7 or 7d)")
     cl.add_argument("--include-flagged", action="store_true",
                     help="also clear tripwire-flagged (evidence) sessions")
     cl.add_argument("--dry-run", action="store_true", help="preview only")

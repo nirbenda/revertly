@@ -78,27 +78,16 @@ def _same_content(a: str, b: str) -> bool:
     return _digest(a) == _digest(b)
 
 
-def _rename_pairs(journal_path: str, since: float = 0.0) -> List[tuple]:
-    """(old, new) pairs from a journal's rename events, tolerant reader."""
+def _rename_pairs(session_id: str, since: float = 0.0) -> List[tuple]:
+    """(old, new) pairs from a session's rename events, via the one shared
+    tolerant journal reader (revertly.search.read_events_raw)."""
+    from revertly.search import read_events_raw
     pairs: List[tuple] = []
-    if not os.path.isfile(journal_path):
-        return pairs
-    try:
-        with open(journal_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    ev = json.loads(line)
-                except ValueError:
-                    continue
-                if (ev.get("kind") == "fs" and ev.get("op") == "rename"
-                        and ev.get("path") and ev.get("path_from")
-                        and (ev.get("t") or 0.0) >= since):
-                    pairs.append((ev["path_from"], ev["path"]))
-    except OSError:
-        pass
+    for ev in read_events_raw(session_id):
+        if (ev.get("kind") == "fs" and ev.get("op") == "rename"
+                and ev.get("path") and ev.get("path_from")
+                and (ev.get("t") or 0.0) >= since):
+            pairs.append((ev["path_from"], ev["path"]))
     return pairs
 
 
@@ -143,21 +132,9 @@ class Reverter:
                       else self._fallback_cutoff())
 
     def _fallback_cutoff(self) -> float:
-        newest = 0.0
-        jp = os.path.join(self.session_dir, "journal.jsonl")
-        try:
-            with open(jp, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        t = json.loads(line).get("t") or 0.0
-                    except ValueError:
-                        continue
-                    newest = max(newest, t)
-        except OSError:
-            pass
+        from revertly.search import read_events_raw
+        newest = max((ev.get("t") or 0.0
+                      for ev in read_events_raw(self.session_id)), default=0.0)
         return newest or (self.meta.started or 0.0)
 
     def is_revertible(self) -> tuple:
@@ -256,15 +233,13 @@ class Reverter:
         Returns {path: {other paths in its chain}}.
         """
         started = self.meta.started or 0.0
-        pairs = _rename_pairs(
-            os.path.join(self.session_dir, "journal.jsonl"), since=started)
+        pairs = _rename_pairs(self.session_id, since=started)
         store = os.path.dirname(self.session_dir.rstrip(os.sep))
         if os.path.abspath(store) == os.path.abspath(paths.sessions_root()):
             for sid in paths.list_session_ids():
-                sdir = os.path.abspath(paths.session_dir(sid))
-                if sdir == self.session_dir:
+                if os.path.abspath(paths.session_dir(sid)) == self.session_dir:
                     continue
-                pairs += _rename_pairs(paths.journal_path(sid), since=started)
+                pairs += _rename_pairs(sid, since=started)
         # union-find the chains
         parent: dict = {}
 

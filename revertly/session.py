@@ -46,7 +46,6 @@ class Session:
     def arm(self) -> SessionMeta:
         paths.ensure_store()
         sdir = paths.ensure_dir(paths.session_dir(self.id))
-        paths.ensure_dir(paths.versions_dir(self.id))
         self._warn_if_blinded()
 
         snapshotter = self._snapshotter or _default_snapshotter()
@@ -236,16 +235,16 @@ class Session:
         except Exception:
             pass
         self._append_incident(tag, op, e.path, hit.pattern)
-        self._desktop_notify(tag, f"{op} {e.path}")
+        # on_write = "log" -> journal + stderr + incident, but no desktop popup.
+        # SELF_TAMPER always pops (it means someone is disabling revertly).
+        if hit.self_tamper or self.cfg.tripwire_on_write != "log":
+            self._desktop_notify(tag, f"{op} {e.path}")
 
     def _append_incident(self, tag, op, path, pattern):
-        try:
-            line = (f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{self.id}\t{tag}\t"
-                    f"{op}\t{path}\t{pattern}\n")
-            with open(paths.incidents_log(), "a") as f:
-                f.write(line)
-        except Exception:
-            pass
+        # one incident schema across the codebase: ts \t session \t tag \t detail
+        # (paths.append_incident writes the same 4 columns with a '-' session).
+        paths.append_incident(tag, f"{op} {path} ({pattern})",
+                              session_id=self.id)
 
     def _desktop_notify(self, title, body):
         # best-effort; never block or raise. macOS only.

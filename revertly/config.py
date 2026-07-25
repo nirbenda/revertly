@@ -173,15 +173,63 @@ def _parse_val(val: str):
             return val.strip('"').strip("'")
 
 
+def parse_days(v):
+    """Accept 30, "30", "30d", "4w" -> int days. None if unparseable."""
+    if isinstance(v, (int, float)):
+        return int(v)
+    s = str(v).strip().lower()
+    try:
+        if s.endswith("d"):
+            return int(float(s[:-1]))
+        if s.endswith("w"):
+            return int(float(s[:-1]) * 7)
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+def parse_gb(v):
+    """Accept 10, "10", "10GB", "512MB", "1TB" -> float gigabytes."""
+    if isinstance(v, (int, float)):
+        return float(v)
+    s = str(v).strip().lower().replace(" ", "")
+    try:
+        if s.endswith("tb"):
+            return float(s[:-2]) * 1024
+        if s.endswith("gb") or s.endswith("g"):
+            return float(s[:-2] if s.endswith("gb") else s[:-1])
+        if s.endswith("mb"):
+            return float(s[:-2]) / 1024
+        return float(s)
+    except ValueError:
+        return None
+
+
+# alias sets so a user writing the natural key/value gets the intended result
+_DAY_KEYS = {"sessions_days", "sessions", "retention_days", "days"}
+_DISK_KEYS = {"max_disk_gb", "max_disk", "disk_cap"}
+
+
 def _apply(cfg: Config, section, key, val):
+    # retention keys are forgiving: any of the day/disk aliases, and human
+    # values like "30d" / "10GB" — so the documented config just works.
+    if section == "retention":
+        if key in _DAY_KEYS:
+            d = parse_days(val)
+            if d is not None:
+                cfg.retention_days = d
+            return
+        if key in _DISK_KEYS:
+            g = parse_gb(val)
+            if g is not None:
+                cfg.max_disk_gb = g
+            return
     mapping = {
         ("watch", "scope"): "watch_scope",
         ("watch", "exclude"): "exclude",
         ("tripwires", "paths"): "tripwire_paths",
         ("tripwires", "on_write"): "tripwire_on_write",
         ("tripwires", "on_read"): "tripwire_on_read",
-        ("retention", "sessions_days"): "retention_days",
-        ("retention", "max_disk_gb"): "max_disk_gb",
         (None, "on_arm_failure"): "on_arm_failure",
         ("watch", "poll_interval"): "poll_interval",
     }
