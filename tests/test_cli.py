@@ -90,6 +90,61 @@ class TestRestore(_Fixture):
             self.assertEqual(f.read(), "changed")
 
 
+class TestClear(_Fixture):
+    def _run(self, argv):
+        args = cli.build_parser().parse_args(argv)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = args.func(args)
+        return rc, buf.getvalue()
+
+    def _flagged_meta(self, sid):
+        m = json.load(open(paths.meta_path(sid)))
+        m["flagged"] = True
+        json.dump(m, open(paths.meta_path(sid), "w"))
+
+    def test_clear_before_session_removes_only_older(self):
+        for s in ("2026-07-25T08-00-00_a", "2026-07-25T09-00-00_b",
+                  "2026-07-25T10-00-00_c"):
+            self._seed_session(s, "f.txt", "x")
+        # backdate started so ordering is real
+        for i, s in enumerate(("2026-07-25T08-00-00_a", "2026-07-25T09-00-00_b",
+                               "2026-07-25T10-00-00_c")):
+            m = json.load(open(paths.meta_path(s)))
+            m["started"] = 1000 + i; m["ended"] = 1000 + i + 0.5
+            json.dump(m, open(paths.meta_path(s), "w"))
+        rc, out = self._run(["clear", "--before", "2026-07-25T09-00-00_b", "--yes"])
+        self.assertEqual(rc, 0)
+        left = set(paths.list_session_ids())
+        self.assertEqual(left, {"2026-07-25T09-00-00_b", "2026-07-25T10-00-00_c"})
+
+    def test_clear_all_keeps_flagged_by_default(self):
+        self._seed_session("2026-07-25T08-00-00_a", "f.txt", "x")
+        self._seed_session("2026-07-25T09-00-00_ev", "f.txt", "x")
+        self._flagged_meta("2026-07-25T09-00-00_ev")
+        rc, out = self._run(["clear", "--all", "--yes"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(set(paths.list_session_ids()), {"2026-07-25T09-00-00_ev"})
+
+    def test_clear_all_include_flagged(self):
+        self._seed_session("2026-07-25T09-00-00_ev", "f.txt", "x")
+        self._flagged_meta("2026-07-25T09-00-00_ev")
+        rc, out = self._run(["clear", "--all", "--include-flagged", "--yes"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(paths.list_session_ids(), [])
+
+    def test_clear_requires_a_selector(self):
+        rc, out = self._run(["clear", "--yes"])
+        self.assertEqual(rc, 2)
+        self.assertIn("specify", out)
+
+    def test_clear_dry_run_changes_nothing(self):
+        self._seed_session("2026-07-25T08-00-00_a", "f.txt", "x")
+        rc, out = self._run(["clear", "--all", "--dry-run"])
+        self.assertIn("dry-run", out)
+        self.assertEqual(len(paths.list_session_ids()), 1)
+
+
 class TestStatusHonesty(_Fixture):
     def test_status_reports_not_installed(self):
         args = cli.build_parser().parse_args(["status"])

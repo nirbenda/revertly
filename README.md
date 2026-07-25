@@ -124,14 +124,39 @@ revertly diff [session] [path…] unified diff, pre-image vs current
 revertly versions <path>        which sessions can restore this file, and what each did to it
 revertly restore <path>         give one file/dir back from its newest pre-image (no session id)
 revertly revert [session] [path…|glob…] [--dry-run] [--force] [--yes]
-revertly rm <session…> [--force] PERMANENTLY delete sessions (the one destructive command)
-revertly ui [--port N]          control panel (timeline/find/diff/revert/live)
+revertly rm <session…> [--force] PERMANENTLY delete specific sessions
+revertly clear [--all|--before <id|7d|date>|--keep Nd] [--include-flagged]
+                                clear stored history at a safe point (frees disk)
+revertly gc [--keep N] [--before X]  enforce retention (age + disk cap)
+revertly ui [--port N]          control panel (timeline/find/diff/revert/storage/live)
 revertly verify [session|--all] audit journal hash chains for tampering
-revertly gc [--keep 30]         prune old sessions (tripwire-flagged kept longest)
 revertly doctor                 health check incl. a security section
 revertly pause | resume | config
 revertly install [--no-profile] | uninstall [--purge]
 ```
+
+## Managing stored history
+
+revertly keeps a pre-image **clone** of the project plus a journal for every
+`claude` run, so deleted files and diffs accumulate. Three ways to keep that in
+check — deletion is the one irreversible operation, so all of them protect the
+**live session** and **flagged (evidence)** sessions, and log every prune:
+
+```sh
+revertly status                     # how much disk, per-session sizes, cap %
+revertly clear --before <session>   # "delete everything before this point"
+revertly clear --all                # wipe all history, keep revertly armed
+revertly clear --keep 7d            # drop anything older than 7 days
+```
+
+`clear --before` takes a session id, an age (`7d`/`12h`), or a date
+(`YYYY-MM-DD`); add `--include-flagged` to also drop evidence sessions,
+`--dry-run` to preview, `--yes` to skip the prompt. **Automatic retention** runs
+on its own: set `retention_days` / `max_disk_gb` in `~/.revertly/config.toml`
+and each session-end prunes the oldest non-flagged sessions to stay under them.
+The **Storage tab** in `revertly ui` does all of this visually — usage bar,
+clear-before picker with a freed-space preview, and a typed confirmation before
+anything evidence-bearing is removed.
 
 Reverts are **preview-first** (plan printed, confirmation required),
 **conflict-aware** (files changed *after* the session — by edit **or by a

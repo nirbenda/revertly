@@ -329,6 +329,30 @@ class TestHttpServer(_StoreFixture):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 404)
 
+    def test_api_storage(self):
+        status, data = self._get_json("/api/storage")
+        self.assertEqual(status, 200)
+        self.assertIn("total_bytes", data)
+        self.assertEqual(data["session_count"], 1)
+        self.assertEqual(len(data["sessions"]), 1)
+
+    def test_api_clear_execute_needs_token(self):
+        status, data = self._post_json(
+            "/api/clear", {"all": True, "dry_run": False})
+        self.assertEqual(status, 403)
+        self.assertTrue(os.path.isdir(paths.session_dir(self.SESSION_ID)))
+
+    def test_api_clear_dry_run_previews(self):
+        status, data = self._post_json(
+            "/api/clear", {"all": True, "include_flagged": True, "dry_run": True})
+        self.assertEqual(status, 200)
+        self.assertIn("count", data)
+        self.assertTrue(os.path.isdir(paths.session_dir(self.SESSION_ID)))
+
+    def test_api_clear_requires_selector(self):
+        status, data = self._post_json("/api/clear", {"dry_run": True})
+        self.assertEqual(status, 400)
+
     def test_host_is_loopback_parsing(self):
         self.assertTrue(server._host_is_loopback("127.0.0.1:8721"))
         self.assertTrue(server._host_is_loopback("localhost"))
