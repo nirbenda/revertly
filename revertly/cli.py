@@ -273,6 +273,10 @@ def cmd_revert(args) -> int:
         print("revertly: no sessions"); return 1
     from .revert import Reverter
     r = Reverter(paths.session_dir(sid))
+    ok, reason = r.is_revertible()
+    if not ok:
+        print(f"revertly: refusing to revert {sid}: {reason}")
+        return 1
     plan = r.plan_paths(args.paths) if args.paths else r.plan()
     print(f"revert plan for {sid}: {plan.summary()}")
     for ch in plan.restores:

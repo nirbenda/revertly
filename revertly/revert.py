@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import time
 from typing import List, Optional
 
@@ -102,11 +103,22 @@ def _rename_pairs(journal_path: str, since: float = 0.0) -> List[tuple]:
 
 
 def _walk_rel(root: str) -> List[str]:
-    """Sorted list of file paths under root, relative to root (posix-ish)."""
+    """Sorted list of REGULAR file paths under root, relative to root.
+
+    Skips FIFOs/sockets/devices (opening a FIFO to hash it blocks forever)
+    and symlinks (following them would let the plan escape the project or
+    hash a device). Only regular files are revert candidates.
+    """
     out = []
     for dirpath, _dirs, files in os.walk(root):
         for fn in files:
             full = os.path.join(dirpath, fn)
+            try:
+                st = os.lstat(full)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue  # symlink, FIFO, socket, device — not a revert target
             out.append(os.path.relpath(full, root))
     out.sort()
     return out
@@ -122,9 +134,49 @@ class Reverter:
         self.cwd = os.path.abspath(self.meta.cwd)
         self.clone = self.meta.clone_path or os.path.join(self.session_dir, "clone")
         self.clone = os.path.abspath(self.clone)
-        # sessions sealed without an explicit end time never trip the
-        # "modified after end" conflict rule.
-        self.ended = self.meta.ended if self.meta.ended is not None else float("inf")
+        # Conflict cutoff: prefer meta.ended, but a session killed before
+        # seal() has ended=None. Falling back to +inf would disable the
+        # "modified after end" rule entirely (silently clobbering later
+        # work), so fall back to the newest journal timestamp, then started.
+        self.ended = (self.meta.ended
+                      if self.meta.ended is not None
+                      else self._fallback_cutoff())
+
+    def _fallback_cutoff(self) -> float:
+        newest = 0.0
+        jp = os.path.join(self.session_dir, "journal.jsonl")
+        try:
+            with open(jp, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        t = json.loads(line).get("t") or 0.0
+                    except ValueError:
+                        continue
+                    newest = max(newest, t)
+        except OSError:
+            pass
+        return newest or (self.meta.started or 0.0)
+
+    def is_revertible(self) -> tuple:
+        """Guard against reverting a session whose pre-image never completed.
+
+        An unarmed session (arm failed under 'proceed') can have an empty or
+        missing clone; since revert classifies "in cwd, not in clone" as
+        CREATED->delete, planning against it would propose deleting the WHOLE
+        project. Returns (ok: bool, reason: str).
+        """
+        if not os.path.isdir(self.clone):
+            return False, "no pre-image (clone dir missing) — nothing to revert from"
+        if not self.meta.armed:
+            has_clone = any(True for _ in _walk_rel(self.clone))
+            if not has_clone:
+                return (False,
+                        "session did not fully arm and its pre-image is empty; "
+                        "reverting would propose deleting the whole project")
+        return True, ""
 
     # ── loading ────────────────────────────────────────────────────────
     def _load_meta(self) -> SessionMeta:
@@ -170,9 +222,31 @@ class Reverter:
         def keep(abs_path: str) -> bool:
             if base(abs_path):
                 return True
-            return any(base(a) for a in aliases.get(abs_path, ()))
+            # Rename inference from poll snapshots is signature-based (mtime,
+            # size) and CAN mis-pair two unrelated same-signature files. So
+            # only follow an alias into a delete if the moved file's CURRENT
+            # content actually matches the selected path's pre-image — proving
+            # it's really the renamed file, not a coincidental collision.
+            for a in aliases.get(abs_path, ()):
+                if base(a) and self._alias_confirms(selected=a, moved=abs_path):
+                    return True
+            return False
 
         return self._build_plan(path_filter=keep)
+
+    def _alias_confirms(self, selected: str, moved: str) -> bool:
+        """True if `moved` (a rename-linked path) is really `selected` moved:
+        its current bytes equal `selected`'s pre-image in the clone. Guards
+        against deleting a coincidental (mtime,size)-collision on a scoped
+        revert."""
+        try:
+            rel = os.path.relpath(selected, self.cwd)
+        except ValueError:
+            return False
+        blob = os.path.join(self.clone, rel)
+        if not (os.path.isfile(blob) and os.path.isfile(moved)):
+            return False
+        return _same_content(blob, moved)
 
     # ── rename chains ──────────────────────────────────────────────────
     def _rename_aliases(self) -> dict:
@@ -392,9 +466,13 @@ class Reverter:
         """Restore MODIFIED/DELETED target from its pre-image bytes."""
         assert change.pre_blob is not None
         dst = change.path
-        if os.path.isdir(dst):
-            # copy2 into a directory would silently write dst/<basename>
-            # instead of failing — surface it as the error it is.
+        # A symlink (or a dir where the agent replaced our file with one) at
+        # dst would make copy2 write THROUGH it — clobbering data outside the
+        # project and never actually restoring dst. Remove any non-regular
+        # occupant first so the restore lands on the real path.
+        if os.path.islink(dst):
+            os.unlink(dst)
+        elif os.path.isdir(dst):
             raise IsADirectoryError(
                 "restore target is (now) a directory: %s" % dst)
         os.makedirs(os.path.dirname(dst) or self.cwd, exist_ok=True)

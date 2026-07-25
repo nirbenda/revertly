@@ -8,6 +8,7 @@ shutil copies so downstream code sees real files, while recording calls.
 Python 3.9, stdlib only.
 """
 import abc
+import os
 import shutil
 import subprocess
 import sys
@@ -35,11 +36,28 @@ class ClonefileCloner(Cloner):
 
     def clone_tree(self, src: str, dst: str) -> None:
         # -R recurse, -c request clonefile. Fall back to -R if clonefile fails
-        # (e.g. non-APFS volume).
-        if not self._run(["cp", "-Rc", src, dst]):
-            if not self._run(["cp", "-R", src, dst]):
-                # Last-resort stdlib copy so bytes still land correctly.
-                shutil.copytree(src, dst)
+        # (e.g. non-APFS volume). Each fallback must start from a CLEAN dst:
+        # a partial `cp -Rc` left behind makes the retry copy src INTO it
+        # (BSD cp nests as dst/<srcname>/…) and then copytree raises
+        # FileExistsError — corrupting the pre-image. Clear dst between tries.
+        if self._run(["cp", "-Rc", src, dst]):
+            return
+        self._clear(dst)
+        if self._run(["cp", "-R", src, dst]):
+            return
+        self._clear(dst)
+        # Last-resort stdlib copy so bytes still land correctly.
+        shutil.copytree(src, dst)
+
+    @staticmethod
+    def _clear(path: str) -> None:
+        if os.path.lexists(path):
+            shutil.rmtree(path, ignore_errors=True)
+            if os.path.lexists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
     def clone_file(self, src: str, dst: str) -> None:
         if not self._run(["cp", "-c", src, dst]):

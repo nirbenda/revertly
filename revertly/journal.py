@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from typing import Optional
 
 from revertly.model import Event, EventKind
@@ -46,6 +47,11 @@ class Journal:
             os.makedirs(parent, exist_ok=True)
         self._last_seq: Optional[int] = None
         self._last_hash: Optional[str] = None
+        # arm() starts one watcher per root (project + sensitive dirs), each a
+        # thread calling append(). Without this lock the read-modify-write of
+        # _last_seq/_last_hash races and corrupts the chain -> verify() would
+        # report the session as TAMPERED. The lock makes append() atomic.
+        self._lock = threading.Lock()
         self._init_from_tail()
 
     def _init_from_tail(self) -> None:
@@ -69,20 +75,21 @@ class Journal:
         self._last_hash = rec.get("hash")
 
     def append(self, e: Event) -> Event:
-        e.seq = 0 if self._last_seq is None else self._last_seq + 1
-        e.prev_hash = self._last_hash
-        e.hash = None
-        record = e.to_json_dict()
-        e.hash = _record_hash(record)
-        record["hash"] = e.hash
-        line = json.dumps(record, sort_keys=True, separators=(",", ":"))
-        with open(self.path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
-        self._last_seq = e.seq
-        self._last_hash = e.hash
-        return e
+        with self._lock:
+            e.seq = 0 if self._last_seq is None else self._last_seq + 1
+            e.prev_hash = self._last_hash
+            e.hash = None
+            record = e.to_json_dict()
+            e.hash = _record_hash(record)
+            record["hash"] = e.hash
+            line = json.dumps(record, sort_keys=True, separators=(",", ":"))
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            self._last_seq = e.seq
+            self._last_hash = e.hash
+            return e
 
     def heartbeat(self) -> Event:
         return self.append(Event(kind=EventKind.HEARTBEAT))

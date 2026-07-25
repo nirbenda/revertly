@@ -531,6 +531,95 @@ class TestMoveChainRobustness(RevertTestCase):
         self.assertTrue(os.path.isfile(self._abs("x")))
         self.assertEqual(self.fx.read_project("x"), b"plain file")
 
+    def test_symlink_restore_does_not_write_through(self):
+        # agent replaced a tracked file with a symlink to an OUTSIDE victim;
+        # revert must not clobber the victim's contents (C4).
+        victim = os.path.join(self.fx.home, "victim.txt")
+        with open(victim, "w") as f:
+            f.write("PRECIOUS")
+        self.fx.seed("f.txt", "original")
+        os.remove(self._abs("f.txt"))
+        os.symlink(victim, self._abs("f.txt"))
+        self.fx.finalize()
+
+        r = Reverter(paths.session_dir(self.fx.sid))
+        r.apply(r.plan(), force=True)
+        with open(victim) as f:
+            self.assertEqual(f.read(), "PRECIOUS",
+                             "revert must not write through a symlink")
+        self.assertFalse(os.path.islink(self._abs("f.txt")))
+        self.assertEqual(self.fx.read_project("f.txt"), b"original")
+
+    def test_fifo_in_project_does_not_hang(self):
+        # a FIFO must be skipped, not opened (opening blocks forever) (H6).
+        self.fx.seed("real.txt", "data")
+        self.fx.modify("real.txt", "changed")
+        os.mkfifo(self._abs("pipe"))
+        self.fx.finalize()
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan()   # must return, not hang
+        planned = {os.path.relpath(c.path, self.fx.project)
+                   for c in plan.restores + plan.deletes}
+        self.assertIn("real.txt", planned)
+        self.assertNotIn("pipe", planned)
+
+    def test_unarmed_empty_clone_session_refuses_revert(self):
+        # an unarmed session with an empty clone must NOT plan whole-project
+        # deletion — is_revertible() gates it (C2).
+        os.makedirs(self._abs("src"), exist_ok=True)
+        with open(self._abs("src/app.py"), "w") as f:
+            f.write("my real work")
+        # seal a meta with armed=False and an empty clone
+        self.fx.finalize()
+        meta = json.load(open(paths.meta_path(self.fx.sid)))
+        meta["armed"] = False
+        json.dump(meta, open(paths.meta_path(self.fx.sid), "w"))
+        r = Reverter(paths.session_dir(self.fx.sid))
+        ok, reason = r.is_revertible()
+        self.assertFalse(ok)
+        self.assertIn("did not fully arm", reason)
+
+    def test_crash_without_seal_still_flags_later_edits(self):
+        # ended=None (killed before seal) must fall back to journal/started
+        # time, not +inf — otherwise post-crash edits are silently clobbered.
+        self.fx.seed("a.txt", "orig")
+        self.fx.modify("a.txt", "agent change")
+        self.fx.finalize()
+        meta = json.load(open(paths.meta_path(self.fx.sid)))
+        started = meta["started"]
+        del meta["ended"]                       # simulate crash before seal
+        json.dump(meta, open(paths.meta_path(self.fx.sid), "w"))
+        # user keeps working AFTER the crash
+        time.sleep(0.02)
+        self.fx.modify("a.txt", "user's later work")
+        r = Reverter(paths.session_dir(self.fx.sid))
+        self.assertNotEqual(r.ended, float("inf"))
+        self.assertGreaterEqual(r.ended, started)
+        plan = r.plan()
+        self.assertTrue(any(c.path == self._abs("a.txt") for c in plan.conflicts),
+                        "post-crash edit must be a conflict, not silently reverted")
+
+    def test_rename_alias_skips_content_mismatch(self):
+        # A renamed to D (recorded), but a DIFFERENT file also sits at D's
+        # name with different content -> scoped revert of A must NOT delete it.
+        self.fx.seed("A.txt", "payload-A")
+        os.rename(self._abs("A.txt"), self._abs("D.txt"))
+        with open(self._abs("D.txt"), "w") as f:
+            f.write("actually different content")   # not a pure rename
+        self.fx.finalize()
+        with open(paths.journal_path(self.fx.sid), "a") as f:
+            f.write(json.dumps({"kind": "fs", "op": "rename",
+                                "path": self._abs("D.txt"),
+                                "path_from": self._abs("A.txt"),
+                                "t": self.fx.ended - 1.0}) + "\n")
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan_paths(["A.txt"])
+        planned = {os.path.relpath(c.path, self.fx.project)
+                   for c in plan.restores + plan.deletes}
+        self.assertIn("A.txt", planned)
+        self.assertNotIn("D.txt", planned,
+                         "content-mismatched alias must not be deleted")
+
     def test_apply_collects_errors_instead_of_aborting(self):
         # one unrestorable path must not stop the rest of the plan
         self.fx.seed("good.txt", "orig")

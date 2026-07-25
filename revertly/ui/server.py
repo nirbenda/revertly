@@ -264,6 +264,11 @@ def run_revert(session_id: str, paths_list, dry_run: bool, force: bool = False):
     sdir = paths.session_dir(session_id)
     try:
         reverter = _make_reverter(revert_mod.Reverter, sdir)
+        checker = getattr(reverter, "is_revertible", None)
+        if callable(checker):
+            ok, reason = checker()
+            if not ok:
+                return 409, {"error": "not revertible: %s" % reason}
         if paths_list:
             plan = _call_plan(reverter.plan_paths, sdir, list(paths_list))
         else:

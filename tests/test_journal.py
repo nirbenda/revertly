@@ -165,6 +165,30 @@ class TestReopen(unittest.TestCase):
             self.assertIsNone(e.prev_hash)
 
 
+class TestConcurrentAppend(unittest.TestCase):
+    def test_parallel_appends_keep_chain_intact(self):
+        # arm() runs one watcher thread per root, all calling append().
+        # Without the lock the seq/hash read-modify-write races and verify()
+        # would report the session as TAMPERED (C3).
+        import threading
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "journal.jsonl")
+            j = Journal(p)
+
+            def worker():
+                for _ in range(200):
+                    j.heartbeat()
+
+            threads = [threading.Thread(target=worker) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            ok, bad = Journal.verify(p)
+            self.assertTrue(ok, f"chain broke at seq {bad} under concurrency")
+            self.assertEqual(len(Journal.read(p)), 800)
+
+
 class TestCorruptTrailingLine(unittest.TestCase):
     def test_read_skips_partial_trailing_line(self):
         # a process killed mid-append leaves a truncated last line; read()

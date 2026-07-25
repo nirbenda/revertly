@@ -66,8 +66,30 @@ class TestArmSeal(SessionBase):
         cloner.clone_tree = boom
         s = Session(cwd=self._proj.name, argv=["claude"], cfg=cfg,
                     snapshotter=FakeSnapshotter(), cloner=cloner, watcher=FakeWatcher())
-        with self.assertRaises(ArmError):
+        with self.assertRaises(ArmError) as ctx:
             s.arm()
+        self.assertEqual(ctx.exception.policy, "abort")
+
+
+class TestShimArmFailure(SessionBase):
+    def test_abort_policy_does_not_run_command(self):
+        # C1: on_arm_failure=abort must REFUSE to run the wrapped command,
+        # not run it unprotected.
+        import io
+        from contextlib import redirect_stderr
+        from unittest import mock
+        from revertly import shim
+        # write a config that selects abort
+        with open(paths.config_path(), "w") as f:
+            f.write("on_arm_failure = \"abort\"\n")
+        # force arm to fail by making the cloner explode via a bad cwd
+        with mock.patch("revertly.session.Session.arm",
+                        side_effect=ArmError("boom", policy="abort")), \
+             mock.patch("subprocess.call") as call:
+            with redirect_stderr(io.StringIO()):
+                rc = shim.run_wrapped(["--", "echo", "hi"])
+        self.assertNotEqual(rc, 0)
+        call.assert_not_called()   # the command must NOT have run
 
 
 class TestEventEnrichment(SessionBase):

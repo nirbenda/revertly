@@ -19,7 +19,9 @@ from .tripwire import TripwireEngine
 
 
 class ArmError(RuntimeError):
-    pass
+    def __init__(self, message: str, policy: str = "abort"):
+        super().__init__(message)
+        self.policy = policy
 
 
 class Session:
@@ -107,8 +109,11 @@ class Session:
         policy = self.cfg.on_arm_failure
         if policy == "proceed":
             return
-        # 'abort' and 'ask' both refuse in a non-interactive context.
-        raise ArmError(f"failed to arm safety net ({exc}); policy={policy}") from exc
+        # 'abort' and 'ask' both refuse in a non-interactive context. The
+        # policy travels on the exception so the shim can honor it (abort =
+        # do NOT run the wrapped command) instead of always proceeding.
+        raise ArmError(f"failed to arm safety net ({exc}); policy={policy}",
+                       policy=policy) from exc
 
     # ─────────────────────── event handling ───────────────────────
 

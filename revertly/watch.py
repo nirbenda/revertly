@@ -69,6 +69,10 @@ class PollingWatcher(Watcher):
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._prev: Snapshot = {}
+        # Serializes _diff_and_emit so the poll thread and stop()'s final
+        # sweep can never run concurrently on _prev (no double-emit, no lost
+        # generation) even if join() times out on a slow scan.
+        self._diff_lock = threading.Lock()
 
     def start(self, root: str, on_event: OnEvent) -> None:
         self._root = root
@@ -83,18 +87,24 @@ class PollingWatcher(Watcher):
         self._stop.set()
         thread = self._thread
         if thread is not None:
-            thread.join(timeout=max(self.interval * 4, 2.0))
-            if thread.is_alive():
-                # join timed out mid-scan; running the sweep now would race
-                # the live thread on self._prev and could emit duplicates or
-                # write after the journal seals. Skip it — the poll thread's
-                # own next diff covers the window.
-                self._thread = None
-                return
+            # Wait for the poll thread to actually exit. A slow scan on a big
+            # tree can exceed one interval, so retry the join a few times
+            # rather than abandoning the thread (which would lose the final
+            # window's events, including tripwire alerts). _run() checks _stop
+            # right after each diff, so this terminates promptly once the
+            # in-flight scan finishes.
+            deadline = max(self.interval * 20, 10.0)
+            waited = 0.0
+            step = max(self.interval, 0.2)
+            while thread.is_alive() and waited < deadline:
+                thread.join(timeout=step)
+                waited += step
         self._thread = None
         # Final catch-up sweep: a session shorter than one poll interval (or
         # changes landing between the last poll and stop) must still be
         # journaled — the session seals the journal right after stopping us.
+        # _diff_lock makes this safe even in the rare case the thread is still
+        # alive: the two calls serialize, so neither double-emits.
         try:
             self._diff_and_emit()
         except OSError:
@@ -138,6 +148,10 @@ class PollingWatcher(Watcher):
                 continue
 
     def _diff_and_emit(self) -> None:
+        with self._diff_lock:
+            self._diff_and_emit_locked()
+
+    def _diff_and_emit_locked(self) -> None:
         current = self._scan()
         prev = self._prev
 

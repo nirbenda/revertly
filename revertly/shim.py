@@ -177,9 +177,23 @@ def run_wrapped(cmd: List[str]) -> int:
         sess = Session(cwd=cwd, argv=cmd, cfg=cfg)
         sess.arm()
     except ArmError as e:
-        print(f"revertly ⚠ could not arm safety net: {e}\n"
-              f"       running UNPROTECTED (set on_arm_failure=abort to refuse).",
-              file=sys.stderr)
+        policy = getattr(e, "policy", "abort")
+        if policy == "abort" or (policy == "ask" and not sys.stdin.isatty()):
+            # fail-CLOSED: the one knob that exists to refuse must refuse —
+            # do NOT run the wrapped command. ('ask' with no TTY can't prompt,
+            # so it degrades to abort rather than silently proceeding.)
+            print(f"revertly ✋ could not arm safety net: {e}\n"
+                  f"       refusing to run (on_arm_failure={policy}). "
+                  f"Set on_arm_failure=proceed to run unprotected, or "
+                  f"REVERTLY_DISABLE=1 to bypass revertly for this run.",
+                  file=sys.stderr)
+            return 3
+        if policy == "ask":
+            resp = input("revertly: could not arm the safety net. Run "
+                         "UNPROTECTED anyway? [y/N] ").strip().lower()
+            if resp != "y":
+                print("aborted.", file=sys.stderr)
+                return 3
         return _exec_unprotected(cmd, reason="arm failed")
     except Exception as e:  # our bug must never block the user
         print(f"revertly ⚠ internal error while arming ({e}); running unprotected.",
