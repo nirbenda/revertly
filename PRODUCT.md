@@ -20,7 +20,7 @@ the *agent* constrained. Seatbelt, not cage.
 | Noun | What it is | Lifetime |
 |---|---|---|
 | **Session** | One run of `claude` under revertly. Has ID + auto-name from the prompt (`2026-07-25_a1b2 "fix-the-tests"`). | Until GC (default 30 days) |
-| **Journal** | Append-only JSONL of every file event (FSEvents) + every tool call (hooks) in a session. | With the session |
+| **Journal** | Append-only JSONL of every file event (polling watcher) + tool calls (hooks, Phase 2) in a session. | With the session |
 | **Version** | A file's content at a point in time. `v0` = session start (from clone); `v1..vn` = after each agent tool-touch (CoW clone per touch — cheap). | With the session |
 | **Checkpoint** | A named marker in the timeline ("after tool call #12"). Revert targets are checkpoints, not raw timestamps. | With the session |
 | **Snapshot** | The APFS volume snapshot from session start. Disaster backstop only. | ~24h (OS-managed) |
@@ -49,7 +49,7 @@ revertly diff [session] [path…]      # unified diff, pre vs now (or version vs
 revertly versions <path>             # the version chain of one file across sessions
 revertly revert …                    # see §4
 revertly ui                          # open the local control panel
-revertly config                      # edit ~/.revertly/config.toml (scope, exclusions, tripwires, retention)
+revertly config                      # show ~/.revertly/config.toml and its path (edit it in your editor)
 revertly pause / resume              # temporarily disarm without uninstalling
 revertly gc [--keep 30d]             # prune sessions
 revertly doctor                      # verify shim order, watcher health, snapshot ability
@@ -80,29 +80,41 @@ equivalent CLI command it will run.
 `~/.revertly/config.toml`:
 ```toml
 [watch]
-scope = "$HOME"                 # what the journal covers
-exclude = ["~/Library/Caches", "~/.revertly", "**/node_modules", "**/.git/objects"]
+scope = "."                     # the project dir (Phase 1). Whole-$HOME is Phase 2.
+exclude = ["~/Library/Caches", "~/.revertly", "**/node_modules",
+           "**/.git", "**/.claude"]
+poll_interval = 0.5             # watcher cadence, seconds
 
 [tripwires]                     # default set ships enabled
-paths = ["~/.ssh/**", "~/.aws/**", "~/.config/gh/**", "~/.zshrc", "~/.zprofile",
-         "~/Library/LaunchAgents/**", "/etc/**", "**/id_rsa*", "**/.env"]
-on_write = "alert"              # phase 1: alert | log     (phase 2 adds: block)
-on_read  = "alert"              # via hook layer (tool-level reads)
+paths = ["~/.ssh/**", "~/.aws/**", "~/.config/gh/**",
+         "~/Library/LaunchAgents/**", "**/id_rsa*", "**/.env", "**/.env.*"]
+on_write = "alert"              # alert (desktop popup + incident) | log (incident only)
+# on_read is NOT implemented in Phase 1 — the polling watcher can't see reads.
 
 [retention]
-sessions = "30d"
-max_disk = "10GB"               # oldest sessions pruned first
+sessions = "30d"                # or sessions_days = 30
+max_disk = "10GB"               # or max_disk_gb = 10 ; oldest non-flagged pruned first
 ```
+*(The config parser is forgiving: `sessions`/`sessions_days`, `max_disk`/`max_disk_gb`,
+and human values like `30d` / `10GB` all work.)*
 
 ---
 
 ## 3. Versioning & journal (what "we can always go back" actually means)
 
-**Version chain per file.** `v0` is captured by the session-start clone. Then a
-`PostToolUse` hook fires after every Edit/Write/Bash, and any file the event
-window shows as touched gets a CoW clone appended to its chain. Result: not just
-"before vs after the session," but **every intermediate state the agent moved
-through** — undo tool call #12 while keeping #13's work.
+> ⚠️ **Implementation status:** Phase 1 captures **one pre-image per session**
+> (`v0`, the session-start clone) — enough to undo any file to its state before
+> the session, and to revert whole sessions. The **per-tool-call `v1..vn` chain**
+> described next (and the `checkpoint`/`version`/`tool` journal fields, and
+> `revert --to cp:N` / `revert --file … --to vN` in §4) is **not implemented**;
+> it needs the hook layer, which is Phase 2. Treat this subsection as the design
+> target, not current behavior.
+
+**Version chain per file (planned).** `v0` is captured by the session-start
+clone. Then a `PostToolUse` hook fires after every Edit/Write/Bash, and any file
+the event window shows as touched gets a CoW clone appended to its chain. Result:
+not just "before vs after the session," but **every intermediate state the agent
+moved through** — undo tool call #12 while keeping #13's work.
 
 **Journal record** (one JSONL line per event):
 ```json
@@ -111,10 +123,10 @@ through** — undo tool call #12 while keeping #13's work.
 {"t":"2026-07-25T10:33:40Z","kind":"tripwire","op":"read","path":"~/.ssh/id_ed25519","tool":"Read","action":"alerted"}
 ```
 Two correlated streams: **fs** (ground truth — what changed on disk, from
-FSEvents) and **tool** (intent — what the agent *said* it was doing, from hooks).
+the polling watcher) and **tool** (intent — planned, via the Phase-2 hook layer).
 Divergence between them is itself a signal (see §5).
 
-**Honest limits, in the doc not the fine print:** FSEvents doesn't report *reads*
+**Honest limits, in the doc not the fine print:** the polling watcher doesn't report *reads*
 and doesn't attribute PIDs. Read-tripwires therefore come from the hook layer
 (they see Claude's Read/Grep/Bash tools — which covers the agent, not arbitrary
 spawned binaries). Full read auditing is a Phase 2 item (Endpoint Security build,
@@ -134,19 +146,26 @@ enterprise-only, where the entitlement cost is justified).
    (you kept working, or another session touched it), revertly flags it, shows a
    3-way diff, and requires an explicit per-file decision. No silent clobbering.
 
-**The grammar:**
+**The grammar (Phase 1, implemented):**
 ```
 revertly revert                          # whole most-recent session (with preview)
 revertly revert <session>                # whole named session
-revertly revert <session> <path…>        # just these files/dirs
+revertly revert <session> <path…|glob…>  # just these files/dirs/globs
+revertly restore <path>                  # one file back, newest pre-image, no session id
+revertly clear --before <session>        # drop stored history before a safe point
+```
+
+**Planned (needs the v1..vn chain from §3, Phase 2):**
+```
 revertly revert <session> --to cp:12     # rewind session to checkpoint 12
 revertly revert --file src/app.ts --to v3   # one file to a specific version
-revertly revert -i                       # interactive picker (TUI version of the Revert composer)
+revertly revert -i                       # interactive TUI picker
 ```
 
 **Semantics per change type:** modified → restore pre-image · created → delete
 (it's in the revert-session if you regret it) · deleted → restore from clone ·
-renamed → rename back (journal recorded both ends).
+renamed → rename-aware: reverting a moved file restores it and removes the copy,
+following the rename chain across sessions.
 
 ---
 
@@ -229,7 +248,7 @@ chain across sessions → `revertly diff --file config/app.yaml v0 v2` → pinpo
 touched it since) → clean restore. Rest of the session's work untouched.
 
 **S4 — Agent deleted the project.**
-Hallucinated cleanup: `rm -rf ~/prj/app`. FSEvents journals the unlinks.
+Hallucinated cleanup: `rm -rf ~/prj/app`. The watcher journals the unlinks.
 `revertly revert` → preview: "restore 1,204 deleted files from clone" → confirm →
 project back in seconds (CoW clone was complete). No Time Machine spelunking.
 
@@ -260,7 +279,7 @@ ever lost (§4 principle 1).
 
 **S9 — Concurrent sessions.**
 Two terminals, two claudes. Each shim invocation = its own session, own clone,
-own journal. FSEvents windows overlap; events in shared paths are attributed to
+own journal. Poll windows overlap; events in shared paths are attributed to
 all overlapping sessions with a `shared:true` flag, and revert previews warn on
 cross-session conflicts (§4 principle 3 handles the rest).
 

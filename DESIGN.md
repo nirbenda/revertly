@@ -1,5 +1,12 @@
 # revertly — a seatbelt, not a cage
 
+> **Note:** this is the original design/vision document. Some mechanisms it
+> describes (FSEvents on `$HOME`, per-file version chains) were changed during
+> implementation — Phase 1 uses a **polling watcher scoped to the project dir**
+> and a **single per-session pre-image**. For what actually ships today, see
+> **README.md** (usage), **PRODUCT.md** (product, with Phase-1/2 status notes),
+> and **TECH-DESIGN.md** (architecture). This doc is kept for the reasoning.
+
 Run Claude Code exactly as you always do. `revertly` sits invisibly underneath,
 records everything it touches, and can undo any of it — up to and including
 "it deleted the filesystem."

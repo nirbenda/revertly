@@ -38,8 +38,9 @@ revertly/
   __main__.py    `python3 -m revertly` → cli.main(). (CTO)
 tests/
   test_model.py, test_config.py, test_journal.py, test_snapshot.py,
-  test_clone.py, test_watch.py, test_tripwire.py, test_revert.py,
-  test_session.py, test_cli.py, test_ui.py, test_e2e.py
+  test_clone.py, test_watch.py, test_tripwire.py, test_search.py,
+  test_revert.py, test_retention.py, test_session.py, test_cli.py,
+  test_ui.py, test_security.py, test_e2e.py
 verify.sh        The verification loop (see below).
 ```
 
@@ -49,11 +50,13 @@ verify.sh        The verification loop (see below).
 ~/.revertly/
   config.toml                     # user config (Tier-1)
   bin/claude                      # the shim
+  incidents.log                   # cross-session tripwire / destructive-action log
   sessions/<id>/
-    meta.json                     # SessionMeta
-    journal.jsonl                 # hash-chained Event stream
+    meta.json                     # SessionMeta (immutable once sealed)
+    journal.jsonl                 # hash-chained Event stream (immutable once sealed)
+    journal.seal                  # immutable {final seq, hash} — truncation anchor
     clone/                        # CoW pre-image of cwd (v0 of every file)
-    versions/<pathhash>/vN        # per-file version blobs (v1..vn)
+    versions/<pathhash>/vN        # (Phase 2) per-file version blobs v1..vn — not written yet
   mirror/                         # (Tier-2) root-owned journal mirror — Phase 1 stubs the dir
 ```
 

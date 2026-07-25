@@ -310,8 +310,10 @@ class Session:
         events = Journal.read(paths.journal_path(self.id))
         fs = [e for e in events if e.kind == EventKind.FS]
         trips = [e for e in events if e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER)]
-        outside = [e for e in fs if e.path and not paths.is_under(e.path, self.cwd)]
-        parts = [f"{len(fs)} files touched"]
+        # count DISTINCT files, not events (a file written 5x is one file)
+        files = {e.path for e in fs if e.path}
+        outside = {p for p in files if not paths.is_under(p, self.cwd)}
+        parts = [f"{len(files)} files touched"]
         if outside:
             parts.append(f"{len(outside)} outside project ⚠")
         if trips:

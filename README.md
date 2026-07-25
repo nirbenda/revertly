@@ -209,8 +209,9 @@ revertly clear --keep 7d            # drop anything older than 7 days
 `clear --before` takes a session id, an age (`7d`/`12h`), or a date
 (`YYYY-MM-DD`); add `--include-flagged` to also drop evidence sessions,
 `--dry-run` to preview, `--yes` to skip the prompt. **Automatic retention** runs
-on its own: set `retention_days` / `max_disk_gb` in `~/.revertly/config.toml`
-and each session-end prunes the oldest non-flagged sessions to stay under them.
+on its own: under `[retention]` in `~/.revertly/config.toml` set
+`sessions = "30d"` (age) and/or `max_disk = "10GB"` (cap) — and each session-end
+prunes the oldest non-flagged sessions to stay under them.
 The **Storage tab** in `revertly ui` does all of this visually — usage bar,
 clear-before picker with a freed-space preview, and a typed confirmation before
 anything evidence-bearing is removed.

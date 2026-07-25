@@ -71,13 +71,16 @@ Now make that pre-positioned state outrank the agent:
   without a separate privilege escalation. This is the single most important
   robustness property revertly has: **the disaster backstop is already outside the
   agent's reach, using an OS primitive, for free.** (A8 defended.)
-- **The clone/journal are mirrored to a root-owned store** (see §4). Even
-  `rm -rf ~/.revertly` (A2) only destroys the *user-writable* copy; the mirror
-  survives because the agent's UID can't write it.
-- **A9 (disk-starvation auto-purge) is defended by monitoring, not prevention:**
-  revertly refuses to arm below a free-space floor and alerts loudly if free space
-  crosses the auto-thinning threshold mid-session — turning a silent backstop
-  loss into a visible "your safety net is at risk" event.
+- **The clone/journal are mirrored to a root-owned store** *(Tier 2 — see §4;
+  not implemented in Phase 1)*. When built, even `rm -rf ~/.revertly` (A2) would
+  only destroy the user-writable copy. **Today** `rm -rf ~/.revertly` while a
+  session is live fires a `SELF_TAMPER` alert (the store is watched), but the
+  data is gone from disk — durable recovery of out-of-project damage rests on
+  the root-gated APFS snapshot.
+- **A9 (disk-starvation auto-purge):** Phase 1 caps the store via retention
+  (age + disk cap, oldest-non-flagged pruned first) and surfaces usage in
+  `revertly status` / the Storage tab. A free-space floor / arm-time refusal
+  below a threshold is a planned hardening, not yet implemented.
 
 Result: the worst a same-UID attacker achieves against recoverability is
 "no *journal* of what I did" — never "my damage is permanent." **Permanence,
@@ -95,22 +98,33 @@ can't be fooled about it.
   the hooks settings fires a `SELF_TAMPER` alert — the highest-severity event,
   surfaced as a notification *the instant it's attempted*. "Disable revertly" thus
   becomes the most conspicuous thing an agent can do, not a quiet first step.
-- **The journal is a hash chain.** Each record carries `H(prev_record)`.
-  Truncation (A3), deletion, or reordering breaks the chain → detected on next
-  read. You cannot silently rewrite history; you can only *visibly* destroy it,
-  which itself is a `SELF_TAMPER` event already mirrored off-UID.
-- **Continuous flush + mirror.** Events are fsync'd and mirrored on write, not
-  buffered until session end. The *attempt* to delete revertly is journaled before
-  the delete completes, and the record is already in the root-owned mirror.
-- **Heartbeat.** The journal carries a periodic heartbeat; a gap = watcher was
-  killed (A1). A gap is itself a logged, alertable anomaly — silence is evidence.
-- **Watchdog/respawn.** A small supervisor re-spawns a killed watcher and
-  records the kill+respawn. Doesn't *prevent* A1 (attacker can loop the kill),
-  but converts it into a visible, repeated `SELF_TAMPER` storm.
+- **The journal is a hash chain.** Each record carries `H(prev_record)`. A
+  modified, reordered, or relinked record breaks the chain → detected on next
+  `revertly verify`. A clean-prefix **truncation** is caught by the immutable
+  `journal.seal` anchor (final seq/hash recorded at seal). You can still
+  *visibly* destroy the file, but not silently rewrite or shorten it.
+- **Continuous flush.** Events are `fsync`'d on write, not buffered until
+  session end, so the *attempt* to touch a sensitive path (or revertly itself)
+  is journaled and incident-logged before the action's effect is complete.
+
+The following are **design targets for the Tier-2/3 builds, NOT implemented in
+Phase 1** (kept here so the roadmap is explicit — see the §9 matrix):
+- **Off-UID mirror (Tier 2).** A root-owned copy of the journal/clone that
+  survives even `rm -rf ~/.revertly`. Today `mirror_root()` is a stub directory;
+  Phase-1 recoverability of *out-of-project* damage rests on the root-gated APFS
+  snapshot alone (which is skippable and not wired into `revert`).
+- **Periodic heartbeat + gap detection (Tier 2).** Phase 1 writes a heartbeat
+  only at arm and seal (two beacons); there is no periodic beat and nothing
+  alerts on a gap yet.
+- **Watchdog/respawn and PID/signal observation (Tier 2/3).** No supervisor
+  re-spawns a killed watcher, and signals to the watcher PID are not observed
+  until the Endpoint-Security build. In Phase 1, killing the shim (`kill $PPID`)
+  stops recording silently.
 
 Net: Phase 1's honest promise isn't "you can't disable me." It's **"you cannot
-disable me *quietly*, and you cannot make me forget what you did before you
-tried."**
+disable me *quietly* through the paths I watch, and you cannot silently rewrite
+what I already recorded."** The stronger "cannot make me forget at all"
+guarantee needs the Tier-2 off-UID mirror above.
 
 ---
 
