@@ -2,16 +2,21 @@
 
 # revertly
 
-### a seatbelt, not a cage
+### a seatbelt for AI coding agents — not a cage
 
-Run Claude Code (or any command) exactly as you always do. **revertly** sits invisibly
-underneath, records everything it touches, and can undo any of it — one bad edit,
-a trashed project, or an agent that decides to `rm -rf`.
+You run **Claude Code** exactly as you always do. **revertly** sits underneath it:
+it snapshots your project *before* the agent starts, records every file the agent
+(or anything it runs) creates, changes, deletes, or renames, and lets you undo any
+of it — one file, one session, or a whole `rm -rf`. It also trips an alert the
+instant the agent touches something sensitive (SSH keys, `.env`, shell config).
 
-![platform](https://img.shields.io/badge/platform-macOS%20(APFS)-black?logo=apple)
+Everything is local. No accounts, no network, nothing leaves your machine.
+
+![platform](https://img.shields.io/badge/macOS-APFS-black?logo=apple)
+![works with](https://img.shields.io/badge/works%20with-Claude%20Code-bc8cff)
 ![deps](https://img.shields.io/badge/dependencies-zero%20·%20pure%20python%20stdlib-3fb950)
-![tests](https://img.shields.io/badge/tests-111%20passing-58a6ff)
-![phase](https://img.shields.io/badge/phase%201-local%20·%20offline%20·%20zero%20config-bc8cff)
+![tests](https://img.shields.io/badge/tests-191%20passing-58a6ff)
+![phase](https://img.shields.io/badge/phase%201-local%20·%20offline-3fb950)
 
 </div>
 
@@ -35,6 +40,43 @@ speed, with no cage — and nothing it does can be permanent or invisible.
 - **Invisibility — gone.** Sensitive paths are tripwired: touch `~/.ssh`, `.env`,
   your shell rc — you get a desktop notification *while it happens*, not a
   forensic surprise weeks later.
+
+## How it works (the mental model)
+
+Four nouns, and every command is a view onto one of them:
+
+- **Session** — one run of `claude` under revertly. It gets an id and a name
+  from your prompt (`2026-07-25_a1b2 "fix-the-tests"`). This is the unit you
+  inspect and undo.
+- **Pre-image (clone)** — a copy-on-write snapshot of your project taken *before*
+  the agent starts. Reverts restore from this. On APFS it's near-instant and
+  shares disk blocks, so it's cheap — but deleted files become real bytes, which
+  is why the store grows and there's a **Storage** view to prune it.
+- **Journal** — an append-only, hash-chained log of every file event in the
+  session. It's what `log`, `find`, and `diff` read, and `verify` audits for
+  tampering.
+- **Tripwire** — a watched sensitive path (credentials, shell config,
+  LaunchAgents, revertly's own files). Touching one fires a desktop notification
+  and an incident-log entry the instant it happens.
+
+So: **the agent works** → revertly **records** (journal) against a **pre-image**
+(clone) → you **inspect** (`last`/`diff`/`find`) and **undo** (`restore`/`revert`)
+→ and **clean up** (`status`/`clear`) when you're at a safe point. Nothing lives
+only inside a tool — it's all plain files under `~/.revertly`.
+
+## Requirements & compatibility
+
+- **OS:** macOS with an **APFS** volume (the default on modern Macs). The
+  copy-on-write clones and volume snapshots are APFS features. Linux/other
+  filesystems are on the roadmap (the watcher and revert engine are portable;
+  the clone/snapshot layer is what's macOS-specific today).
+- **Runtime:** `python3` — already on a stock Mac. **Zero third-party dependencies.**
+- **Agent:** **Claude Code** works out of the box — `install.sh` drops in a
+  `claude` shim that arms the net on every run. Under the hood revertly wraps
+  *any* command (`revertly shim -- <cmd> …`), so it isn't Claude-specific;
+  first-class shims for other agents (Cursor, Codex CLI, Aider, Antigravity, …)
+  are a natural next step and planned. The recording is filesystem-level, so it
+  already captures whatever *any* of them — or a script they run — does on disk.
 
 ## Install
 
@@ -114,25 +156,40 @@ On exit you get one summary line, and everything stays revertible.
 
 ## Commands
 
+Grouped by what you're trying to do (run `revertly <command> -h` for details
+and examples on any of them):
+
+**See what the agent just did**
 ```
-revertly status                 armed? recent sessions, store location
-revertly last                   summary of the most recent session (+ integrity check)
+revertly last                    summary of the most recent session (+ integrity check)
+revertly diff [session] [path…]  unified diff of every change, pre-image vs now
 revertly log [session] [--tripwires] [--outside] [--tool Edit] [--path X]
-revertly find <pattern> [--op delete] [--since 7d]
-                                search EVERY session — "what happened to X, when?"
-revertly diff [session] [path…] unified diff, pre-image vs current
-revertly versions <path>        which sessions can restore this file, and what each did to it
-revertly restore <path>         give one file/dir back from its newest pre-image (no session id)
+revertly find <pattern> [--op delete] [--since 7d]   "what happened to X, and when?"
+```
+
+**Undo**
+```
+revertly restore <path>          give one file/dir back — no session id needed
 revertly revert [session] [path…|glob…] [--dry-run] [--force] [--yes]
-revertly rm <session…> [--force] PERMANENTLY delete specific sessions
-revertly clear [--all|--before <id|7d|date>|--keep Nd] [--include-flagged]
-                                clear stored history at a safe point (frees disk)
-revertly gc [--keep N] [--before X]  enforce retention (age + disk cap)
-revertly ui [--port N]          control panel (timeline/find/diff/revert/storage/live)
-revertly verify [session|--all] audit journal hash chains for tampering
-revertly doctor                 health check incl. a security section
-revertly pause | resume | config
-revertly install [--no-profile] | uninstall [--purge]
+revertly versions <path>         which sessions can restore this file, and what each did
+```
+
+**Manage stored history** (clones pile up — see the next section)
+```
+revertly status                  armed? disk usage, recent sessions
+revertly clear [--all | --before <id|7d|date> | --keep Nd] [--include-flagged]
+revertly gc [--keep N] [--before X]   apply the retention policy (age + disk cap)
+revertly rm <session…> [--force]      permanently delete specific sessions
+```
+
+**Set up, inspect, and check health**
+```
+revertly install [--no-profile]  add the claude shim to your PATH
+revertly ui [--port N]           visual control panel (timeline/find/diff/revert/storage/live)
+revertly doctor                  is the net armed and healthy? (incl. a security section)
+revertly verify [session|--all]  audit journal hash chains for tampering
+revertly pause | resume          disarm / rearm without uninstalling
+revertly config | uninstall [--purge]
 ```
 
 ## Managing stored history
@@ -227,9 +284,10 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-169 tests (including an end-to-end lifecycle test, a security/tamper suite, and
-move-chain/data-loss regressions) across model, config, journal, snapshot,
-clone, watch, tripwire, search, revert, session, ui, and hardening. TDD throughout.
+191 tests (including an end-to-end lifecycle test, a security/tamper suite,
+move-chain/data-loss regressions, and the retention planner) across model,
+config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
+session, cli, ui, and hardening. TDD throughout.
 
 ## Read more
 

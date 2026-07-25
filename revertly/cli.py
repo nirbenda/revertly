@@ -685,46 +685,127 @@ def cmd_shim(args) -> int:
 
 # ─────────────────────────── parser ───────────────────────────
 
+_DESCRIPTION = """\
+revertly — a seatbelt for AI coding agents (not a cage).
+
+Run Claude Code (or any command) exactly as you always do. revertly sits
+underneath it: it snapshots your project *before* the agent starts, records
+every file the agent (or anything it runs) creates, changes, deletes, or
+renames, and lets you undo any of it — one file, one session, or a whole
+`rm -rf`. It also trips an alert the instant an agent touches something
+sensitive (SSH keys, .env, shell config, LaunchAgents).
+
+Everything is local — no accounts, no network, nothing leaves your machine.
+Today: macOS (APFS) + Claude Code, out of the box.
+"""
+
+_EPILOG = """\
+common workflows
+  see what the agent just did
+    revertly last                    summary of the most recent session
+    revertly diff                    every change it made, as a unified diff
+    revertly log --tripwires         just the sensitive-path hits
+  undo something
+    revertly restore <file>          put one file back (no session id needed)
+    revertly revert                  undo the whole last session (asks first)
+    revertly revert <id> <path>…     undo just some paths of a session
+    revertly find <name>             which session touched a file, and when
+  keep the store in check (pre-image clones pile up)
+    revertly status                  disk usage + recent sessions
+    revertly clear --before <id>     clear history before a safe point
+    revertly gc                      apply the retention policy (age + cap)
+  set up & check health
+    revertly install                 add the `claude` shim to your PATH
+    revertly doctor                  is the net armed and healthy?
+    revertly ui                      open the visual control panel
+
+escape hatches
+    REVERTLY_DISABLE=1 claude …      run once with no net
+    revertly pause / revertly resume disarm / rearm without uninstalling
+
+Run `revertly <command> -h` for details on any command.
+The full story and the honest security model are in README.md / THREAT-MODEL.md.
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="revertly", description="a seatbelt, not a cage")
-    sub = p.add_subparsers(dest="command")
+    p = argparse.ArgumentParser(
+        prog="revertly", description=_DESCRIPTION, epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="command", metavar="<command>",
+                           title="commands")
 
-    sub.add_parser("status").set_defaults(func=cmd_status)
-    sub.add_parser("last").set_defaults(func=cmd_last)
+    sub.add_parser("status", help="armed? disk usage, recent sessions"
+                   ).set_defaults(func=cmd_status)
+    sub.add_parser("last", help="summary of the most recent session"
+                   ).set_defaults(func=cmd_last)
 
-    lg = sub.add_parser("log"); lg.add_argument("session", nargs="?")
-    lg.add_argument("--outside", action="store_true")
-    lg.add_argument("--tripwires", action="store_true")
-    lg.add_argument("--tool")
-    lg.add_argument("--path")
+    lg = sub.add_parser("log", help="event-by-event log of a session")
+    lg.add_argument("session", nargs="?")
+    lg.add_argument("--outside", action="store_true",
+                    help="only events outside the project dir")
+    lg.add_argument("--tripwires", action="store_true",
+                    help="only sensitive-path (tripwire) hits")
+    lg.add_argument("--tool", help="filter to one tool, e.g. Edit")
+    lg.add_argument("--path", help="filter by path (substring or glob)")
     lg.set_defaults(func=cmd_log)
 
-    fd = sub.add_parser("find",
-                        help="search ALL sessions for a path (substring or glob)")
-    fd.add_argument("pattern")
+    fd = sub.add_parser(
+        "find", help="search ALL sessions for a path (substring or glob)",
+        description="Answer 'what happened to this file, and when?' across every "
+                    "session. Prints each matching event with a ready-to-run "
+                    "recover command.",
+        epilog="examples:\n"
+               "  revertly find config.yaml\n"
+               "  revertly find '*.env' --op delete\n"
+               "  revertly find secrets --since 7d\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    fd.add_argument("pattern", help="path substring, or a glob like '*.env'")
     fd.add_argument("--op", help="filter by op: write|create|delete|rename")
     fd.add_argument("--since", help="only events newer than e.g. 7d or 12h")
     fd.set_defaults(func=cmd_find)
 
-    df = sub.add_parser("diff"); df.add_argument("session", nargs="?")
+    df = sub.add_parser("diff", help="unified diff of a session: pre-image vs now")
+    df.add_argument("session", nargs="?")
     df.add_argument("paths", nargs="*"); df.set_defaults(func=cmd_diff)
 
-    vs = sub.add_parser("versions"); vs.add_argument("path"); vs.set_defaults(func=cmd_versions)
+    vs = sub.add_parser("versions",
+                        help="which sessions can restore this file, and what each did")
+    vs.add_argument("path"); vs.set_defaults(func=cmd_versions)
 
-    rv = sub.add_parser("revert"); rv.add_argument("session", nargs="?")
-    rv.add_argument("paths", nargs="*")
-    rv.add_argument("--yes", "-y", action="store_true")
-    rv.add_argument("--dry-run", action="store_true")
-    rv.add_argument("--force", action="store_true")
+    rv = sub.add_parser(
+        "revert", help="undo a session (whole, or just some paths/globs)",
+        description="Roll a session's changes back to their pre-image. With no "
+                    "session id, the most recent session. Add paths (or globs) to "
+                    "revert only those. Every revert is itself a session, so you "
+                    "can always undo the undo.",
+        epilog="examples:\n"
+               "  revertly revert                       # undo the last session\n"
+               "  revertly revert --dry-run             # just preview it\n"
+               "  revertly revert <id> src/app.py       # only this file\n"
+               "  revertly revert <id> '*.py'           # every .py it touched\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    rv.add_argument("session", nargs="?", help="session id (default: most recent)")
+    rv.add_argument("paths", nargs="*", help="limit to these paths/dirs/globs")
+    rv.add_argument("--yes", "-y", action="store_true", help="skip the confirm")
+    rv.add_argument("--dry-run", action="store_true", help="preview only")
+    rv.add_argument("--force", action="store_true",
+                    help="override conflicts (paths changed after the session)")
     rv.set_defaults(func=cmd_revert)
 
-    rs = sub.add_parser("restore",
-                         help="restore one file/dir from its newest pre-image "
-                              "(no session id needed)")
-    rs.add_argument("path")
-    rs.add_argument("--yes", "-y", action="store_true")
-    rs.add_argument("--dry-run", action="store_true")
-    rs.add_argument("--force", action="store_true")
+    rs = sub.add_parser(
+        "restore", help="restore one file/dir from its newest pre-image",
+        description="The quick 'give me this file back' command — finds the newest "
+                    "session holding a pre-image of the path and reverts just that "
+                    "path. No session id needed.",
+        epilog="examples:\n"
+               "  revertly restore config/app.yaml\n"
+               "  revertly restore src/ --dry-run\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    rs.add_argument("path", help="the file or directory to bring back")
+    rs.add_argument("--yes", "-y", action="store_true", help="skip the confirm")
+    rs.add_argument("--dry-run", action="store_true", help="preview only")
+    rs.add_argument("--force", action="store_true", help="override conflicts")
     rs.set_defaults(func=cmd_restore)
 
     rm = sub.add_parser("rm",
@@ -735,52 +816,73 @@ def build_parser() -> argparse.ArgumentParser:
                     help="allow deleting tripwire-flagged sessions")
     rm.set_defaults(func=cmd_rm)
 
-    ui = sub.add_parser("ui"); ui.add_argument("--port", type=int, default=0)
+    ui = sub.add_parser("ui", help="open the local visual control panel")
+    ui.add_argument("--port", type=int, default=0)
     ui.set_defaults(func=cmd_ui)
 
-    sub.add_parser("config").set_defaults(func=cmd_config)
-    sub.add_parser("pause").set_defaults(func=cmd_pause)
-    sub.add_parser("resume").set_defaults(func=cmd_resume)
+    sub.add_parser("config", help="show the config file and its location"
+                   ).set_defaults(func=cmd_config)
+    sub.add_parser("pause", help="disarm revertly until 'resume' (logged)"
+                   ).set_defaults(func=cmd_pause)
+    sub.add_parser("resume", help="re-arm after 'pause'"
+                   ).set_defaults(func=cmd_resume)
 
     gc = sub.add_parser("gc", help="enforce retention policy (age + disk cap)")
     gc.add_argument("--keep", type=int, default=30, help="keep sessions ≤ N days")
     gc.add_argument("--before", help="also prune before a session id / 7d / YYYY-MM-DD")
     gc.set_defaults(func=cmd_gc)
 
-    cl = sub.add_parser("clear",
-                        help="clear stored history at a safe point (frees disk)")
+    cl = sub.add_parser(
+        "clear", help="clear stored history at a safe point (frees disk)",
+        description="revertly keeps a pre-image clone per session, so the store "
+                    "grows. When you're at a safe point (committed / shipped), "
+                    "clear the history you no longer need. The live session and "
+                    "flagged (evidence) sessions are protected unless you opt in.",
+        epilog="examples:\n"
+               "  revertly clear --before <session-id>  # everything before that point\n"
+               "  revertly clear --before 7d            # older than 7 days\n"
+               "  revertly clear --all                  # wipe history, keep revertly\n"
+               "  revertly clear --all --dry-run        # see what that would free\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     cl.add_argument("--all", action="store_true",
                     help="clear ALL sessions (keeps the live one)")
     cl.add_argument("--before", help="clear before a session id / 7d / YYYY-MM-DD")
     cl.add_argument("--keep", type=int, help="clear everything older than N days")
     cl.add_argument("--include-flagged", action="store_true",
                     help="also clear tripwire-flagged (evidence) sessions")
-    cl.add_argument("--dry-run", action="store_true")
-    cl.add_argument("--yes", "-y", action="store_true")
+    cl.add_argument("--dry-run", action="store_true", help="preview only")
+    cl.add_argument("--yes", "-y", action="store_true", help="skip the confirm")
     cl.set_defaults(func=cmd_clear)
 
-    vf = sub.add_parser("verify")
+    vf = sub.add_parser("verify",
+                        help="audit journal hash chains for tampering")
     vf.add_argument("session", nargs="?")
     vf.add_argument("--all", action="store_true", help="verify every session")
     vf.set_defaults(func=cmd_verify)
 
-    dr = sub.add_parser("doctor")
+    dr = sub.add_parser("doctor",
+                        help="health check: shim in PATH, snapshots, security")
     dr.add_argument("--install", action="store_true",
                     help="post-install mode: don't WARN that PATH isn't sourced yet")
     dr.set_defaults(func=cmd_doctor)
 
-    ins = sub.add_parser("install")
+    ins = sub.add_parser("install",
+                        help="install the `claude` shim + launcher into PATH")
     ins.add_argument("--no-profile", action="store_true",
                      help="don't touch the shell profile; just print the PATH line")
     ins.set_defaults(func=cmd_install)
 
-    un = sub.add_parser("uninstall")
+    un = sub.add_parser("uninstall",
+                        help="remove the shim + launcher (add --purge to wipe history)")
     un.add_argument("--purge", action="store_true",
                     help="also delete the session store (~/.revertly and all history)")
     un.add_argument("--yes", "-y", action="store_true")
     un.set_defaults(func=cmd_uninstall)
 
-    sh = sub.add_parser("shim"); sh.add_argument("cmd", nargs=argparse.REMAINDER)
+    # internal: the shim entrypoint the installed `claude` wrapper calls.
+    # No help= -> argparse omits it from the command list (it's not user-facing).
+    sh = sub.add_parser("shim")
+    sh.add_argument("cmd", nargs=argparse.REMAINDER)
     sh.set_defaults(func=cmd_shim)
 
     return p
@@ -791,6 +893,18 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
+        if not argv:
+            # bare `revertly`: a short, friendly orientation, not a wall of flags
+            print(_DESCRIPTION)
+            print("Quick start:")
+            print("  revertly install         set up the `claude` shim (once)")
+            print("  claude \"…\"                use Claude Code as usual — it's now recorded")
+            print("  revertly last            see what it changed")
+            print("  revertly restore <file>  put a file back  ·  revertly revert  undo it all")
+            print("  revertly ui              visual control panel")
+            print()
+            print("All commands:  revertly --help      One command:  revertly <cmd> -h")
+            return 0
         parser.print_help()
         return 0
     return args.func(args)
