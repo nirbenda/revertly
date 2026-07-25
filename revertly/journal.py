@@ -89,6 +89,9 @@ class Journal:
 
     @staticmethod
     def read(path) -> list:
+        """Best-effort reader: a corrupt/partial line (process killed
+        mid-append) is skipped, never fatal — verify() is the strict surface
+        that reports tampering/corruption precisely."""
         if not os.path.exists(path):
             return []
         events = []
@@ -96,7 +99,10 @@ class Journal:
             for line in f:
                 if not line.strip():
                     continue
-                events.append(Event.from_json_dict(json.loads(line)))
+                try:
+                    events.append(Event.from_json_dict(json.loads(line)))
+                except (ValueError, KeyError):
+                    continue
         return events
 
     @staticmethod

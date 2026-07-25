@@ -35,12 +35,11 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from revertly import paths
+from revertly.search import MUTATING_OPS as _MUTATING_OPS
+from revertly.search import read_events_raw, read_meta_raw
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _INDEX_HTML = os.path.join(_HERE, "index.html")
-
-# fs-event ops that represent an actual on-disk mutation
-_MUTATING_OPS = ("write", "create", "delete", "rename")
 
 # Per-run action token (CSRF guard for mutating endpoints).
 ACTION_TOKEN = secrets.token_hex(16)
@@ -55,43 +54,29 @@ def _host_is_loopback(host_header) -> bool:
     host = host_header.strip().lower()
     if host.startswith("[") and "]" in host:      # [::1]:port
         host = host[:host.index("]") + 1]
-    else:
+    elif host.count(":") == 1:                    # name:port
         host = host.rsplit(":", 1)[0]
+    # else: bare IPv6 like ::1 — no port to strip
     return host in _LOOPBACK_HOSTS
+
+
+def _valid_sid(sid) -> bool:
+    """Session ids are single path components — never let one traverse."""
+    return bool(sid) and "/" not in sid and os.sep not in sid \
+        and sid not in (".", "..")
 
 
 # ─────────────────────────── store readers ───────────────────────────
 
 def _read_meta(session_id: str):
-    p = paths.meta_path(session_id)
-    if not os.path.isfile(p):
+    """meta dict, or None if the session is unknown (drives 404s)."""
+    if not os.path.isfile(paths.meta_path(session_id)):
         return None
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    return read_meta_raw(session_id) or None
 
 
-def _read_events(session_id: str):
-    p = paths.journal_path(session_id)
-    events = []
-    if not os.path.isfile(p):
-        return events
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    events.append(json.loads(line))
-                except ValueError:
-                    # tolerate a corrupt/partial trailing line
-                    continue
-    except OSError:
-        return events
-    return events
+# journal reading is owned by revertly.search — one tolerant reader everywhere
+_read_events = read_events_raw
 
 
 def _is_outside_project(ev: dict, cwd) -> bool:
@@ -179,18 +164,17 @@ def build_diff(session_id: str, abs_path: str):
     meta = _read_meta(session_id)
     if meta is None:
         return None
-    cwd = meta.get("cwd") or ""
-    # locate the pre-image inside clone/ by the path's location relative to cwd
-    pre_path = None
-    norm_abs = os.path.normpath(abs_path)
-    norm_cwd = os.path.normpath(cwd) if cwd else ""
-    if norm_cwd and (norm_abs == norm_cwd or
-                     norm_abs.startswith(norm_cwd.rstrip(os.sep) + os.sep)):
-        rel = os.path.relpath(norm_abs, norm_cwd)
-        pre_path = os.path.join(paths.clone_dir(session_id), rel)
+    cwd = os.path.realpath(meta.get("cwd") or "")
+    # Confinement: BOTH sides only ever read inside the session's project dir
+    # (this endpoint is a tokenless GET — it must not become a file oracle).
+    norm_abs = os.path.realpath(os.path.normpath(abs_path))
+    if not paths.is_under(norm_abs, cwd):
+        return {"error": "path is outside the session project dir"}
+    rel = os.path.relpath(norm_abs, cwd)
+    pre_path = os.path.join(paths.clone_dir(session_id), rel)
 
     pre, pre_bin = _read_text_best_effort(pre_path)
-    cur, cur_bin = _read_text_best_effort(abs_path)
+    cur, cur_bin = _read_text_best_effort(norm_abs)
 
     diff = "".join(difflib.unified_diff(
         pre.splitlines(keepends=True),
@@ -221,8 +205,7 @@ def locate_file(session_id: str, abs_path: str, which: str):
         return None, "unknown session: %s" % session_id
     cwd = os.path.realpath(meta.get("cwd") or "")
     norm_abs = os.path.realpath(os.path.normpath(abs_path))
-    prefix = cwd.rstrip(os.sep) + os.sep
-    if not (norm_abs == cwd or norm_abs.startswith(prefix)):
+    if not paths.is_under(norm_abs, cwd):
         return None, "path is outside the session project dir"
     rel = os.path.relpath(norm_abs, cwd)
 
@@ -233,18 +216,34 @@ def locate_file(session_id: str, abs_path: str, which: str):
     else:
         return None, "which must be 'pre' or 'cur'"
     candidate = os.path.realpath(os.path.join(root, rel))
-    if not (candidate == root or
-            candidate.startswith(root.rstrip(os.sep) + os.sep)):
+    if not paths.is_under(candidate, root):
         return None, "path escapes the session root"
     if not os.path.isfile(candidate):
         return None, "no %s copy of %s" % (which, rel)
     return candidate, os.path.basename(candidate)
 
 
-def delete_session(session_id: str):
-    """Permanently remove one session from the store. Returns (status, payload)."""
-    if _read_meta(session_id) is None:
+def delete_session(session_id: str, force: bool = False):
+    """Permanently remove one session from the store. Returns (status, payload).
+
+    Mirrors the CLI's evidence guard: tripwire-flagged (or still-live)
+    sessions are refused with 409 unless force=True — the UI must escalate
+    explicitly, same as `revertly rm --force`.
+    """
+    meta = _read_meta(session_id)
+    if meta is None:
         return 404, {"error": "unknown session: %s" % session_id}
+    if not force:
+        reasons = []
+        if meta.get("ended") is None:
+            reasons.append("session appears to be still running")
+        trips = sum(1 for e in _read_events(session_id)
+                    if e.get("kind") in ("tripwire", "self_tamper"))
+        if trips:
+            reasons.append("%d tripwire event(s) — it may be evidence" % trips)
+        if reasons:
+            return 409, {"error": "refusing to delete: %s (pass force to "
+                                   "override)" % "; ".join(reasons)}
     paths.rmtree_force(paths.session_dir(session_id))
     return 200, {"deleted": session_id}
 
@@ -286,8 +285,10 @@ def run_revert(session_id: str, paths_list, dry_run: bool, force: bool = False):
     payload["is_clean"] = bool(getattr(plan, "is_clean", True))
     payload["revert_id"] = revert_id
     # design rule: the UI shows the equivalent CLI for every action
-    payload["cli"] = "revertly revert %s %s%s" % (
-        session_id, " ".join(paths_list or []),
+    import shlex
+    payload["cli"] = "revertly revert %s%s%s" % (
+        shlex.quote(session_id),
+        "".join(" " + shlex.quote(p) for p in (paths_list or [])),
         " --dry-run" if dry_run else " --yes")
     return 200, payload
 
@@ -395,12 +396,16 @@ class Handler(BaseHTTPRequestHandler):
             rest = path[len(prefix):]
             if rest.endswith("/diff"):
                 sid = urllib.parse.unquote(rest[:-len("/diff")])
+                if not _valid_sid(sid):
+                    return self._error(400, "invalid session id")
                 return self._serve_diff(sid, query)
             if rest.endswith("/file"):
                 sid = urllib.parse.unquote(rest[:-len("/file")])
+                if not _valid_sid(sid):
+                    return self._error(400, "invalid session id")
                 return self._serve_file(sid, query)
             sid = urllib.parse.unquote(rest)
-            if sid and "/" not in sid:
+            if _valid_sid(sid):
                 data = load_session(sid)
                 if data is None:
                     return self._error(404, "unknown session: %s" % sid)
@@ -414,12 +419,13 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         prefix = "/api/session/"
-        if path.startswith(prefix) and path.endswith("/revert"):
-            sid = urllib.parse.unquote(path[len(prefix):-len("/revert")])
-            return self._serve_revert(sid)
-        if path.startswith(prefix) and path.endswith("/delete"):
-            sid = urllib.parse.unquote(path[len(prefix):-len("/delete")])
-            return self._serve_delete(sid)
+        for suffix, handler in (("/revert", self._serve_revert),
+                                ("/delete", self._serve_delete)):
+            if path.startswith(prefix) and path.endswith(suffix):
+                sid = urllib.parse.unquote(path[len(prefix):-len(suffix)])
+                if not _valid_sid(sid):
+                    return self._error(400, "invalid session id")
+                return handler(sid)
         self._error(404, "not found: %s" % path)
 
     # -- endpoint impls --
@@ -467,7 +473,14 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_delete(self, sid):
         if not self._has_token():
             return self._error(403, "missing or bad X-Revertly-Token")
-        status, payload = delete_session(sid)
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except ValueError:
+            body = {}
+        force = bool(isinstance(body, dict) and body.get("force"))
+        status, payload = delete_session(sid, force=force)
         self._send_json(payload, status=status)
 
     def _serve_diff(self, sid, query):
@@ -477,6 +490,8 @@ class Handler(BaseHTTPRequestHandler):
         result = build_diff(sid, path_vals[0])
         if result is None:
             return self._error(404, "unknown session: %s" % sid)
+        if "error" in result:
+            return self._error(404, result["error"])
         self._send_json(result)
 
     def _serve_revert(self, sid):
@@ -493,6 +508,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, "'paths' must be a list")
         dry_run = bool(body.get("dry_run", True))
         force = bool(body.get("force", False))
+        if not paths_list and not body.get("all"):
+            # an empty selection must NEVER silently mean "everything" —
+            # whole-session revert requires an explicit {"all": true}
+            return self._error(
+                400, "no paths selected; pass {\"all\": true} to revert "
+                     "the whole session")
         if not dry_run and not self._has_token():
             # executing a real revert mutates the filesystem — token required
             return self._error(403, "missing or bad X-Revertly-Token")

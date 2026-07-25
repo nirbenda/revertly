@@ -64,6 +64,17 @@ def meta_path(session_id: str) -> str:
     return os.path.join(session_dir(session_id), "meta.json")
 
 
+def is_under(path: str, root: str) -> bool:
+    """True if `path` equals `root` or lies beneath it (string-prefix on
+    normalized paths — callers pass already-normalized/realpathed values).
+    The one place the 'is this path inside that dir' check lives; a bare
+    startswith(root) is a bug (/a/bc matches /a/b)."""
+    if not path or not root:
+        return False
+    root = root.rstrip(os.sep) or os.sep
+    return path == root or path.startswith(root + os.sep)
+
+
 def ensure_dir(path: str) -> str:
     os.makedirs(path, exist_ok=True)
     return path

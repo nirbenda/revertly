@@ -388,6 +388,18 @@ class TestPlanPathsGlobs(RevertTestCase):
         got = [os.path.relpath(c.path, self.fx.project) for c in plan.restores]
         self.assertEqual(got, ["docs/readme.md"])
 
+    def test_literal_path_with_brackets_still_matches(self):
+        # Next.js-style dirs contain [] — they must behave as literal paths,
+        # not fnmatch character classes (regression: glob detection dropped
+        # them from the prefix list entirely).
+        self.fx.seed("app/[slug]/page.tsx", "orig")
+        self.fx.modify("app/[slug]/page.tsx", "broken")
+        self.fx.finalize()
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan_paths(["app/[slug]/page.tsx"])
+        got = [os.path.relpath(c.path, self.fx.project) for c in plan.restores]
+        self.assertEqual(got, ["app/[slug]/page.tsx"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -165,6 +165,21 @@ class TestReopen(unittest.TestCase):
             self.assertIsNone(e.prev_hash)
 
 
+class TestCorruptTrailingLine(unittest.TestCase):
+    def test_read_skips_partial_trailing_line(self):
+        # a process killed mid-append leaves a truncated last line; read()
+        # must return the clean prefix, never crash (verify() stays strict).
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "journal.jsonl")
+            j = Journal(p)
+            j.heartbeat()
+            j.heartbeat()
+            with open(p, "a") as f:
+                f.write('{"kind": "fs", "op": "wri')  # torn write
+            events = Journal.read(p)
+            self.assertEqual(len(events), 2)
+
+
 class TestHeartbeat(unittest.TestCase):
     def test_heartbeat_appends_and_reads(self):
         with tempfile.TemporaryDirectory() as d:

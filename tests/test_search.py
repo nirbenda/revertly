@@ -85,9 +85,13 @@ class TestFindEvents(unittest.TestCase):
         self.assertEqual(hits[0]["kind"], "tripwire")
 
     def test_heartbeats_never_match(self):
-        self.assertEqual(find_events("*"), find_events("*"))
-        for h in find_events("*"):
+        hits = find_events("*")
+        self.assertEqual(len(hits), 4)  # 3 mutating fs + 1 tripwire, no heartbeat
+        for h in hits:
             self.assertNotEqual(h["kind"], "heartbeat")
+
+    def test_limit_caps_results(self):
+        self.assertEqual(len(find_events("*", limit=2)), 2)
 
     def test_carries_session_context(self):
         h = find_events("main.py")[0]

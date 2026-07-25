@@ -44,7 +44,7 @@ def path_matches(path: Optional[str], pattern: str) -> bool:
     return pat in p
 
 
-def _read_events_raw(session_id: str) -> List[dict]:
+def read_events_raw(session_id: str) -> List[dict]:
     """Journal lines as dicts; tolerant of a corrupt/partial trailing line."""
     out: List[dict] = []
     jp = paths.journal_path(session_id)
@@ -65,7 +65,7 @@ def _read_events_raw(session_id: str) -> List[dict]:
     return out
 
 
-def _read_meta_raw(session_id: str) -> dict:
+def read_meta_raw(session_id: str) -> dict:
     mp = paths.meta_path(session_id)
     try:
         with open(mp, "r", encoding="utf-8") as f:
@@ -76,19 +76,25 @@ def _read_meta_raw(session_id: str) -> dict:
 
 def find_events(pattern: str, *, op: Optional[str] = None,
                 since: Optional[float] = None,
-                session_ids: Optional[Iterable[str]] = None) -> List[dict]:
+                session_ids: Optional[Iterable[str]] = None,
+                limit: int = 500) -> List[dict]:
     """Search every session's journal for path-matching events.
 
     Returns hit dicts, newest session first:
       {session_id, session_name, cwd, kind, op, path, t}
     Only mutating fs events and tripwire/self_tamper events are considered
-    (heartbeats and reads-without-paths never match).
+    (heartbeats and reads-without-paths never match). Stops after `limit`
+    hits so a broad pattern over a huge store stays bounded.
     """
     hits: List[dict] = []
     sids = list(session_ids) if session_ids is not None else paths.list_session_ids()
     for sid in sorted(sids, reverse=True):
-        meta = _read_meta_raw(sid)
-        for ev in _read_events_raw(sid):
+        if len(hits) >= limit:
+            break
+        meta = read_meta_raw(sid)
+        for ev in read_events_raw(sid):
+            if len(hits) >= limit:
+                break
             kind = ev.get("kind")
             if kind == "fs":
                 if ev.get("op") not in MUTATING_OPS:

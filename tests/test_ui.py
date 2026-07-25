@@ -285,13 +285,58 @@ class TestHttpServer(_StoreFixture):
         self.assertEqual(status, 403)
         self.assertTrue(os.path.isdir(paths.session_dir(self.SESSION_ID)))
 
-    def test_delete_session_with_token(self):
+    def test_delete_flagged_session_needs_force(self):
+        # the seeded session has tripwire events -> evidence guard kicks in
         status, data = self._post_json(
             "/api/session/%s/delete" % self.SESSION_ID, {},
+            token=server.ACTION_TOKEN)
+        self.assertEqual(status, 409)
+        self.assertIn("tripwire", data["error"])
+        self.assertTrue(os.path.isdir(paths.session_dir(self.SESSION_ID)))
+
+    def test_delete_session_with_token_and_force(self):
+        status, data = self._post_json(
+            "/api/session/%s/delete" % self.SESSION_ID, {"force": True},
             token=server.ACTION_TOKEN)
         self.assertEqual(status, 200)
         self.assertEqual(data["deleted"], self.SESSION_ID)
         self.assertFalse(os.path.isdir(paths.session_dir(self.SESSION_ID)))
+
+    def test_post_sid_with_slash_rejected(self):
+        # %2F in the sid must never reach os.path.join (delete/revert/file)
+        status, data = self._post_json(
+            "/api/session/%s%%2Fclone/delete" % self.SESSION_ID, {},
+            token=server.ACTION_TOKEN)
+        self.assertEqual(status, 400)
+        self.assertTrue(os.path.isdir(paths.clone_dir(self.SESSION_ID)))
+
+    def test_revert_empty_paths_rejected(self):
+        # empty selection must never mean "whole session"
+        status, data = self._post_json(
+            "/api/session/%s/revert" % self.SESSION_ID,
+            {"paths": [], "dry_run": True})
+        self.assertEqual(status, 400)
+        self.assertIn("all", data["error"])
+
+    def test_diff_confined_to_project(self):
+        import urllib.parse
+        q = urllib.parse.quote("/etc/hosts")
+        url = ("http://127.0.0.1:%d/api/session/%s/diff?path=%s"
+               % (self.port, self.SESSION_ID, q))
+        try:
+            urllib.request.urlopen(url, timeout=5)
+            self.fail("expected HTTPError")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+    def test_host_is_loopback_parsing(self):
+        self.assertTrue(server._host_is_loopback("127.0.0.1:8721"))
+        self.assertTrue(server._host_is_loopback("localhost"))
+        self.assertTrue(server._host_is_loopback("[::1]:8721"))
+        self.assertTrue(server._host_is_loopback("::1"))   # bare IPv6
+        self.assertFalse(server._host_is_loopback("evil.example"))
+        self.assertFalse(server._host_is_loopback("evil.example:80"))
+        self.assertFalse(server._host_is_loopback(""))
 
     # ── DNS-rebinding guard ──────────────────────────────────────────
 

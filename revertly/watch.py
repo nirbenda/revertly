@@ -84,6 +84,13 @@ class PollingWatcher(Watcher):
         thread = self._thread
         if thread is not None:
             thread.join(timeout=max(self.interval * 4, 2.0))
+            if thread.is_alive():
+                # join timed out mid-scan; running the sweep now would race
+                # the live thread on self._prev and could emit duplicates or
+                # write after the journal seals. Skip it — the poll thread's
+                # own next diff covers the window.
+                self._thread = None
+                return
         self._thread = None
         # Final catch-up sweep: a session shorter than one poll interval (or
         # changes landing between the last poll and stop) must still be

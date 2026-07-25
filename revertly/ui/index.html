@@ -171,6 +171,8 @@ function postJSON(url, payload) {
 }
 function fmtTime(t) { if (!t) return ""; try { return new Date(t * 1000).toLocaleString(); } catch (e) { return String(t); } }
 function matches(hay, q) { if (!q) return true; if (!hay) return false; return hay.toLowerCase().indexOf(q.toLowerCase()) !== -1; }
+function isUnder(path, root) { if (!path || !root) return false; root = root.replace(/\/+$/, ""); return path === root || path.indexOf(root + "/") === 0; }
+function debounce(fn, ms) { var t = null; return function(){ clearTimeout(t); t = setTimeout(fn, ms); }; }
 function fileURL(sid, path, which) {
   return "/api/session/" + encodeURIComponent(sid) + "/file?path=" + encodeURIComponent(path) + "&which=" + which;
 }
@@ -260,18 +262,27 @@ function refilterOpenEvents() {
 }
 function deleteSession(s) {
   var msg = "PERMANENTLY delete session " + s.id + (s.name ? " (" + s.name + ")" : "") +
-            "?\n\nIts journal, pre-images and revert points are gone forever — this is the one revertly action that cannot be undone." +
-            (s.tripwire_count ? "\n\n⚠ This session has " + s.tripwire_count + " tripwire event(s) — it may be evidence." : "");
+            "?\n\nIts journal, pre-images and revert points are gone forever — this is the one revertly action that cannot be undone.";
   if (!window.confirm(msg)) return;
   postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", {}).then(function(res){
+    if (res.status === 409) {
+      // server-side evidence guard (tripwire-flagged / still running)
+      if (!window.confirm("⚠ " + ((res.body && res.body.error) || "flagged session") +
+                          "\n\nDelete anyway?")) return;
+      postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", { force: true }).then(function(r2){
+        if (!r2.ok) { window.alert("delete failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
+        loadTimeline();
+      });
+      return;
+    }
     if (!res.ok) { window.alert("delete failed: " + ((res.body && res.body.error) || res.status)); return; }
     loadTimeline();
   });
 }
 function loadTimeline() { getJSON("/api/sessions").then(function(res){ tlRows = res.body || []; renderTimeline(); }); }
 document.getElementById("tl-refresh").addEventListener("click", loadTimeline);
-document.getElementById("tl-filter").addEventListener("input", renderTimeline);
-document.getElementById("tl-evfilter").addEventListener("input", refilterOpenEvents);
+document.getElementById("tl-filter").addEventListener("input", debounce(renderTimeline, 150));
+document.getElementById("tl-evfilter").addEventListener("input", debounce(refilterOpenEvents, 150));
 
 // ---- Find (search all sessions) ----
 function runFind() {
@@ -298,13 +309,17 @@ function runFind() {
         var line = el("div", "hit" + ((h.kind !== "fs" || h.op === "delete") ? " risky" : ""));
         line.appendChild(el("span", "k", h.kind + (h.op ? "/" + h.op : "")));
         line.appendChild(el("span", "p", (fmtTime(h.t) ? fmtTime(h.t) + "  " : "") + h.path));
-        var bDiff = el("button", "act mini", "diff");
-        bDiff.addEventListener("click", function(){ jumpToDiff(h.session_id, h.path); });
-        var bDl = el("button", "act mini", "pre ⬇");
-        bDl.addEventListener("click", function(){ window.open(fileURL(h.session_id, h.path, "pre")); });
-        var bRes = el("button", "act danger mini", "restore…");
-        bRes.addEventListener("click", function(){ restoreOne(h.session_id, h.path); });
-        line.appendChild(bDiff); line.appendChild(bDl); line.appendChild(bRes);
+        if (isUnder(h.path, h.cwd)) {
+          var bDiff = el("button", "act mini", "diff");
+          bDiff.addEventListener("click", function(){ jumpToDiff(h.session_id, h.path); });
+          var bDl = el("button", "act mini", "pre ⬇");
+          bDl.addEventListener("click", function(){ window.open(fileURL(h.session_id, h.path, "pre")); });
+          var bRes = el("button", "act danger mini", "restore…");
+          bRes.addEventListener("click", function(){ restoreOne(h.session_id, h.path); });
+          line.appendChild(bDiff); line.appendChild(bDl); line.appendChild(bRes);
+        } else {
+          line.appendChild(el("span", "sub", "outside project — no pre-image"));
+        }
         card.appendChild(line);
       });
       out.appendChild(card);
@@ -317,12 +332,18 @@ function restoreOne(sid, path) {
   postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: true }).then(function(res){
     if (!res.ok) { window.alert("preview failed: " + ((res.body && res.body.error) || res.status)); return; }
     var b = res.body;
+    if (!(b.restores || []).length && !(b.deletes || []).length) {
+      window.alert("Nothing to revert for this path — it is already identical to its pre-image (or has no pre-image in this session).");
+      return;
+    }
     if (!window.confirm("Revert this path from session " + sid + "?\n\n" + (b.summary || "") +
                         "\n\nEquivalent CLI:\n" + (b.cli || "") +
                         "\n\nNon-destructive: the revert is itself a session you can undo.")) return;
     postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: false }).then(function(r2){
       if (!r2.ok) { window.alert("revert failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
-      window.alert("Reverted.\nUndo with: revertly revert " + (r2.body.revert_id || "<revert-session>"));
+      if (!r2.body.revert_id) { window.alert("Nothing was reverted — the plan was empty by the time it ran."); return; }
+      window.alert("Reverted.\nUndo with: revertly revert " + r2.body.revert_id);
+      loadTimeline();
     });
   });
 }
@@ -347,8 +368,10 @@ function populateSessionPickers(done) {
       sessionCache.forEach(function(s){ var o = el("option"); o.value = s.id; o.textContent = (s.name || s.id); sel.appendChild(o); });
       if (prev) sel.value = prev;
     });
+    // when a caller (e.g. jumpToDiff) will set its own selection, let it
+    // drive the path loads — two concurrent loads race the dropdown.
+    if (done) { done(); return; }
     loadDiffPaths(); loadRevertPaths();
-    if (done) done();
   });
 }
 function changedPathsFor(sessionId, cb) {
@@ -454,7 +477,13 @@ function revertPreview(cb) {
   var sid = document.getElementById("rev-session").value; if (!sid) return;
   var paths = selectedRevPaths();
   var summ = document.getElementById("rev-summary");
-  summ.style.display = ""; summ.textContent = "Previewing…";
+  summ.style.display = "";
+  if (!paths.length) {
+    // an empty selection must never escalate to "revert everything"
+    summ.textContent = "0 paths selected — check some boxes (or clear the filter). Nothing was sent.";
+    return;
+  }
+  summ.textContent = "Previewing…";
   postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: paths, dry_run: true }).then(function(res){
     summ.innerHTML = "";
     if (res.status === 501) { summ.appendChild(el("div", null, "Revert engine unavailable (501). " + ((res.body && res.body.error) || ""))); return; }
@@ -478,8 +507,9 @@ document.getElementById("rev-execute").addEventListener("click", function(){
     var summ = document.getElementById("rev-summary");
     postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: paths, dry_run: false }).then(function(res){
       if (!res.ok) { summ.appendChild(el("div", "err-note", "revert failed: " + ((res.body && res.body.error) || res.status))); return; }
+      if (!res.body.revert_id) { summ.appendChild(el("div", "err-note", "Nothing was reverted — the plan was empty (all conflicts, or already identical).")); return; }
       summ.appendChild(el("div", "ok-note", "Reverted ✓  (" + (res.body.summary || "") + ")"));
-      summ.appendChild(el("div", "cli", "undo: revertly revert " + (res.body.revert_id || "<revert-session>")));
+      summ.appendChild(el("div", "cli", "undo: revertly revert " + res.body.revert_id));
       loadTimeline();
     });
   });

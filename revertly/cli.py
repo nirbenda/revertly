@@ -35,6 +35,15 @@ def _resolve_session(arg: Optional[str]) -> Optional[str]:
     return paths.latest_session_id()
 
 
+def _confirm(prompt: str) -> bool:
+    """y/N prompt that treats a closed/non-TTY stdin as 'no', not a crash."""
+    try:
+        return input(prompt).strip().lower() == "y"
+    except EOFError:
+        print("(no tty — aborting; use --yes to skip the prompt)")
+        return False
+
+
 def _pause_flag() -> str:
     return os.path.join(paths.revertly_home(), "paused")
 
@@ -135,7 +144,13 @@ def cmd_find(args) -> int:
         op = h["op"] or ""
         print(f"  {ts}  {h['kind']}/{op:7} {h['path']}")
         if h["kind"] == "fs" and op in ("delete", "write", "rename"):
-            print(f"           ↳ recover: revertly revert {h['session_id']} {h['path']}")
+            import shlex
+            if paths.is_under(h["path"], h["cwd"]):
+                print(f"           ↳ recover: revertly revert "
+                      f"{h['session_id']} {shlex.quote(h['path'])}")
+            else:
+                print("           ↳ outside the session's project dir — "
+                      "no pre-image; not auto-revertible")
     print(f"\n{len(hits)} event(s) across "
           f"{len({h['session_id'] for h in hits})} session(s)")
     return 0
@@ -180,9 +195,8 @@ def cmd_rm(args) -> int:
               f"({', '.join(flagged)}) without --force — they may be evidence.")
         return 1
     if not args.yes:
-        resp = input(f"PERMANENTLY delete {len(args.sessions)} session(s), "
-                     f"{total/1e6:.1f} MB — no revert possible? [y/N] ").strip().lower()
-        if resp != "y":
+        if not _confirm(f"PERMANENTLY delete {len(args.sessions)} session(s), "
+                        f"{total/1e6:.1f} MB — no revert possible? [y/N] "):
             print("aborted."); return 1
     for sid in args.sessions:
         paths.rmtree_force(paths.session_dir(sid))
@@ -225,8 +239,7 @@ def cmd_versions(args) -> int:
     for sid in paths.list_session_ids()[::-1]:
         m = _load_meta(sid) or {}
         cwd = m.get("cwd", "")
-        prefix = cwd.rstrip(os.sep) + os.sep
-        if not cwd or not (target == cwd or target.startswith(prefix)):
+        if not paths.is_under(target, cwd):
             continue
         rel = os.path.relpath(target, cwd)
         blob = os.path.join(paths.clone_dir(sid), rel)
@@ -268,10 +281,8 @@ def cmd_revert(args) -> int:
     if not plan.is_clean and not args.force:
         print("revertly: conflicts present; re-run with --force to override them "
               "(they are skipped otherwise).")
-    if not args.yes:
-        resp = input("proceed? [y/N] ").strip().lower()
-        if resp != "y":
-            print("aborted."); return 1
+    if not args.yes and not _confirm("proceed? [y/N] "):
+        print("aborted."); return 1
     rid = r.apply(plan, force=args.force)
     print(f"reverted. undo this revert with: revertly revert {rid}")
     return 0

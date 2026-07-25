@@ -115,26 +115,23 @@ class Reverter:
         """Revert restricted to the given files/dirs/globs.
 
         Each entry may be absolute or relative to cwd. A directory includes
-        everything beneath it. Entries containing * ? or [ are fnmatch globs,
-        matched against the cwd-relative path and the basename (so `*.py`
-        selects every .py the session touched, at any depth).
+        everything beneath it. Entries containing * ? or [ are ALSO tried as
+        globs (revertly.search.path_matches — the same matcher `find` uses),
+        so `*.py` selects every .py the session touched at any depth — while
+        a literal path that merely contains brackets (Next.js `app/[slug]/`)
+        still matches exactly via its prefix.
         """
-        import fnmatch
+        from revertly.search import is_glob, path_matches
 
-        globs = [p for p in paths_arg if any(c in p for c in "*?[")]
-        prefixes = [self._normalize(p) for p in paths_arg if p not in globs]
+        prefixes = [self._normalize(p) for p in paths_arg]
+        globs = [p for p in paths_arg if is_glob(p)]
 
         def keep(abs_path: str) -> bool:
             for pre in prefixes:
-                if abs_path == pre:
+                if abs_path == pre or abs_path.startswith(pre + os.sep):
                     return True
-                if abs_path.startswith(pre + os.sep):
-                    return True
-            rel = os.path.relpath(abs_path, self.cwd)
-            base = os.path.basename(abs_path)
             for g in globs:
-                if (fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(base, g)
-                        or fnmatch.fnmatch(abs_path, g)):
+                if path_matches(abs_path, g):
                     return True
             return False
 
