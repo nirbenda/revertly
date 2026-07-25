@@ -128,6 +128,31 @@ def latest_session_id() -> Optional[str]:
     return ids[-1] if ids else None
 
 
+def tree_size(path: str) -> int:
+    """Total bytes of all files under path (follows no symlinks)."""
+    total = 0
+    if not os.path.isdir(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+    for root, _dirs, files in os.walk(path):
+        for fn in files:
+            try:
+                total += os.lstat(os.path.join(root, fn)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def session_size(session_id: str) -> int:
+    return tree_size(session_dir(session_id))
+
+
+def store_size() -> int:
+    return tree_size(sessions_root())
+
+
 # ─────────────────── tamper-raising immutability (Tier-1) ───────────────────
 # macOS user-immutable flag (uchg). A same-UID attacker CAN clear it, but only
 # with a deliberate extra step (`chflags nouchg`) — which raises the bar and,

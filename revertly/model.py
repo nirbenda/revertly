@@ -117,6 +117,7 @@ class SessionMeta:
     armed: bool = False              # did the safety net fully arm?
     is_revert: bool = False          # this session was itself a revert
     reverts_session: Optional[str] = None  # id of the session this reverted
+    flagged: bool = False            # had ≥1 tripwire/self-tamper (evidence)
 
     def to_json_dict(self) -> dict:
         return {k: v for k, v in asdict(self).items() if v is not None}

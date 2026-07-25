@@ -284,6 +284,11 @@ class Session:
         if self.meta:
             self.meta.ended = time.time()
             self.meta.exit_code = exit_code
+            # record evidence status so retention/status don't rescan journals
+            events = Journal.read(paths.journal_path(self.id))
+            self.meta.flagged = any(
+                e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER)
+                for e in events)
             self._save_meta()
         # Seal for real: make the evidence tamper-RAISING. A same-UID attacker
         # must now `chflags nouchg` before editing/removing — an extra, visible
@@ -291,6 +296,13 @@ class Session:
         paths.make_immutable(paths.journal_path(self.id))
         paths.make_immutable(paths.meta_path(self.id))
         paths.make_immutable(paths.seal_path(self.id))
+        # Automatic retention: enforce the config's day/disk limits now that a
+        # session just landed. Best-effort, never blocks or breaks sealing.
+        try:
+            from . import retention
+            retention.enforce_policy(self.cfg)
+        except Exception:
+            pass
         return self.meta
 
     def summary_line(self) -> str:

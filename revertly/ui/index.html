@@ -114,6 +114,7 @@
   <button data-tab="find">Find</button>
   <button data-tab="diff">Diff</button>
   <button data-tab="revert">Revert</button>
+  <button data-tab="storage">Storage</button>
   <button data-tab="live">Live</button>
 </nav>
 
@@ -168,6 +169,28 @@
     </div>
     <div class="card" id="rev-paths"></div>
     <div class="summary" id="rev-summary" style="display:none"></div>
+  </section>
+
+  <section id="tab-storage" class="tab">
+    <div id="storage-summary" class="card" style="padding:14px 16px"></div>
+    <div class="card" style="padding:14px 16px">
+      <div class="name" style="margin-bottom:8px">Clear history at a safe point</div>
+      <div class="sub" style="margin-bottom:12px">Reverts and pre-image clones pile up. When you've committed / shipped and don't need the undo history, clear it — the live session and flagged (evidence) sessions are protected.</div>
+      <div class="toolbar">
+        <select id="clear-mode">
+          <option value="before">clear everything before…</option>
+          <option value="keep">clear older than N days…</option>
+          <option value="all">clear ALL history</option>
+        </select>
+        <select id="clear-before"></select>
+        <input type="text" id="clear-keep" placeholder="days" style="display:none;width:90px">
+        <label class="chk" style="display:inline-flex"><input type="checkbox" id="clear-flagged"> include flagged (evidence)</label>
+        <button class="act" id="clear-preview">Preview</button>
+        <button class="act danger" id="clear-go">Clear…</button>
+      </div>
+      <div class="summary" id="clear-summary" style="display:none"></div>
+    </div>
+    <div id="storage-list"></div>
   </section>
 
   <section id="tab-live" class="tab">
@@ -257,6 +280,7 @@ navButtons.forEach(function(btn){
     document.querySelectorAll(".tab").forEach(function(t){ t.classList.remove("active"); });
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "diff" || btn.dataset.tab === "revert") populateSessionPickers();
+    if (btn.dataset.tab === "storage") loadStorage();
   });
 });
 function switchTab(name) {
@@ -612,6 +636,105 @@ document.getElementById("rev-execute").addEventListener("click", function(){
       summ.appendChild(el("div", "cli", "undo: revertly revert " + res.body.revert_id));
       loadTimeline();
     });
+    });
+  });
+});
+
+// ---- Storage ----
+function human(n) {
+  if (n == null) return "—";
+  var u = ["B","KB","MB","GB","TB"], i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(1)) + " " + u[i];
+}
+var storageData = null;
+function loadStorage() {
+  getJSON("/api/storage").then(function(res){
+    storageData = res.body || {};
+    renderStorageSummary();
+    populateClearBefore();
+    renderStorageList();
+  });
+}
+function renderStorageSummary() {
+  var d = storageData, box = document.getElementById("storage-summary");
+  box.innerHTML = "";
+  box.appendChild(el("div", "name", human(d.total_bytes) + " across " + (d.session_count || 0) + " session(s)"));
+  var bits = [];
+  if (d.cap_bytes) {
+    var pct = Math.min(100, Math.round(d.total_bytes / d.cap_bytes * 100));
+    bits.push("cap " + human(d.cap_bytes) + " (" + pct + "% used)");
+    var bar = el("div"); bar.style.cssText = "height:8px;border-radius:4px;background:var(--panel2);margin:8px 0;overflow:hidden";
+    var fill = el("div"); fill.style.cssText = "height:100%;width:" + pct + "%;background:" + (pct >= 80 ? "var(--alert)" : "var(--accent)");
+    bar.appendChild(fill); box.appendChild(bar);
+  }
+  if (d.retention_days) bits.push("keeping ~" + d.retention_days + "d (auto)");
+  if (d.oldest) bits.push("oldest " + fmtTime(d.oldest));
+  box.appendChild(el("div", "sub", bits.join("  ·  ")));
+}
+function populateClearBefore() {
+  var sel = document.getElementById("clear-before");
+  sel.innerHTML = "";
+  (storageData.sessions || []).forEach(function(s){
+    var o = el("option"); o.value = s.id;
+    o.textContent = fmtTime(s.started) + "  " + s.id + (s.flagged ? "  ⚠" : "");
+    sel.appendChild(o);
+  });
+}
+function renderStorageList() {
+  var list = document.getElementById("storage-list"); list.innerHTML = "";
+  var card = el("div", "card");
+  (storageData.sessions || []).forEach(function(s){
+    var line = el("div", "hit");
+    line.appendChild(el("span", "k", human(s.size)));
+    line.appendChild(el("span", "p", s.id + (s.flagged ? "  ⚠flagged" : "") + (s.is_revert ? "  ↩revert" : "") + (s.live ? "  ●live" : "")));
+    card.appendChild(line);
+  });
+  if (!(storageData.sessions || []).length) card.appendChild(el("div", "empty", "No sessions stored."));
+  list.appendChild(card);
+}
+document.getElementById("clear-mode").addEventListener("change", function(){
+  var m = this.value;
+  document.getElementById("clear-before").style.display = (m === "before") ? "" : "none";
+  document.getElementById("clear-keep").style.display = (m === "keep") ? "" : "none";
+});
+function clearRequestBody(dry) {
+  var m = document.getElementById("clear-mode").value;
+  var body = { dry_run: dry, include_flagged: document.getElementById("clear-flagged").checked };
+  if (m === "all") body.all = true;
+  else if (m === "before") body.before = document.getElementById("clear-before").value;
+  else if (m === "keep") body.keep_days = parseFloat(document.getElementById("clear-keep").value || "0");
+  return body;
+}
+function clearPreview(cb) {
+  var summ = document.getElementById("clear-summary");
+  summ.style.display = ""; summ.textContent = "Previewing…";
+  postJSON("/api/clear", clearRequestBody(true)).then(function(res){
+    summ.innerHTML = "";
+    if (!res.ok) { summ.appendChild(el("div", "err-note", (res.body && res.body.error) || ("error " + res.status))); return; }
+    var b = res.body;
+    summ.appendChild(el("div", "name", b.count + " session(s), " + human(b.freed_bytes) + " to free"));
+    if (b.flagged_count) summ.appendChild(el("div", "err-note", "⚠ " + b.flagged_count + " flagged (evidence) session(s) included"));
+    if (cb) cb(b);
+  });
+}
+document.getElementById("clear-preview").addEventListener("click", function(){ clearPreview(null); });
+document.getElementById("clear-go").addEventListener("click", function(){
+  clearPreview(function(b){
+    if (!b.count) { uiAlert("Nothing to clear — store already clean for this selection."); return; }
+    uiConfirm({
+      title: "Permanently clear " + b.count + " session(s)?",
+      danger: true, confirmText: "Clear " + human(b.freed_bytes),
+      requireType: b.flagged_count ? "clear evidence" : null,
+      body: [ human(b.freed_bytes) + " will be freed. This cannot be undone.",
+              b.flagged_count ? ("⚠ includes " + b.flagged_count + " flagged evidence session(s) — type \"clear evidence\" to confirm.") : null ]
+    }).then(function(ok){
+      if (!ok) return;
+      postJSON("/api/clear", clearRequestBody(false)).then(function(res){
+        if (!res.ok) { uiAlert("Clear failed: " + ((res.body && res.body.error) || res.status)); return; }
+        uiAlert({ title: "Cleared ✓", body: ["Freed " + human(res.body.freed_bytes) + " across " + res.body.removed + " session(s)."] });
+        loadStorage(); loadTimeline();
+      });
     });
   });
 });

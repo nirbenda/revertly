@@ -223,6 +223,63 @@ def locate_file(session_id: str, abs_path: str, which: str):
     return candidate, os.path.basename(candidate)
 
 
+def storage_summary():
+    """Totals + per-session sizes for the Storage tab."""
+    from revertly import retention
+    from revertly.config import load as load_config
+    cfg = load_config(paths.config_path())
+    sessions = retention.collect()
+    total = sum(s.size for s in sessions)
+    return {
+        "total_bytes": total,
+        "session_count": len(sessions),
+        "oldest": min((s.started for s in sessions), default=None),
+        "cap_bytes": int(cfg.max_disk_gb * 1e9) if cfg.max_disk_gb else None,
+        "retention_days": cfg.retention_days or None,
+        "sessions": [
+            {"id": s.id, "started": s.started, "ended": s.ended,
+             "size": s.size, "flagged": s.flagged, "is_revert": s.is_revert,
+             "live": s.is_live}
+            for s in sessions
+        ],
+    }
+
+
+def run_clear(before=None, keep_days=None, clear_all=False,
+              include_flagged=False, dry_run=True):
+    """Plan (and optionally apply) a history clear. Returns (status, payload)."""
+    try:
+        from revertly import retention
+    except ImportError as e:
+        return 501, {"error": "retention unavailable: %s" % e}
+    before_ts = None
+    if before:
+        # a session id -> its start; else leave to caller (UI sends id or epoch)
+        infos = {s.id: s.started for s in retention.collect()}
+        before_ts = infos.get(before)
+        if before_ts is None:
+            try:
+                before_ts = float(before)
+            except (TypeError, ValueError):
+                return 400, {"error": "bad 'before': use a session id or epoch"}
+    if not clear_all and before_ts is None and keep_days is None:
+        return 400, {"error": "specify all, before, or keep_days"}
+    items = retention.plan(retention.collect(), keep_days=keep_days,
+                           before=before_ts, clear_all=clear_all,
+                           include_flagged=include_flagged)
+    payload = {
+        "count": len(items),
+        "freed_bytes": sum(i.size for i in items),
+        "flagged_count": sum(1 for i in items if i.flagged),
+        "sessions": [{"id": i.id, "size": i.size, "flagged": i.flagged,
+                      "reason": i.reason} for i in items],
+        "dry_run": bool(dry_run),
+    }
+    if not dry_run:
+        payload["removed"] = retention.apply(items)
+    return 200, payload
+
+
 def delete_session(session_id: str, force: bool = False):
     """Permanently remove one session from the store. Returns (status, payload).
 
@@ -393,6 +450,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_index()
         if path == "/api/sessions":
             return self._send_json(list_sessions())
+        if path == "/api/storage":
+            return self._send_json(storage_summary())
         if path == "/api/find":
             return self._serve_find(query)
 
@@ -424,6 +483,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if path == "/api/clear":
+            return self._serve_clear()
         prefix = "/api/session/"
         for suffix, handler in (("/revert", self._serve_revert),
                                 ("/delete", self._serve_delete)):
@@ -475,6 +536,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def _serve_clear(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except ValueError:
+            return self._error(400, "invalid JSON body")
+        if not isinstance(body, dict):
+            return self._error(400, "body must be a JSON object")
+        dry_run = bool(body.get("dry_run", True))
+        if not dry_run and not self._has_token():
+            return self._error(403, "missing or bad X-Revertly-Token")
+        status, payload = run_clear(
+            before=body.get("before"), keep_days=body.get("keep_days"),
+            clear_all=bool(body.get("all")),
+            include_flagged=bool(body.get("include_flagged")),
+            dry_run=dry_run)
+        self._send_json(payload, status=status)
 
     def _serve_delete(self, sid):
         if not self._has_token():

@@ -2,8 +2,9 @@
 
 Usage:
   claude …                      (via the shim — arms the net automatically)
-  revertly status | last | log | find | diff | versions | revert | rm | ui
-        | config | pause | resume | gc | verify | doctor | install | shim
+  revertly status | last | log | find | diff | versions | revert | restore
+        | rm | clear | ui | config | pause | resume | gc | verify | doctor
+        | install | shim
 """
 from __future__ import annotations
 
@@ -75,13 +76,35 @@ def cmd_status(args) -> int:
         state = "armed (shim is first in PATH; arms on next claude run)"
     print(f"revertly: {state}")
     ids = paths.list_session_ids()
-    print(f"sessions: {len(ids)}  store: {paths.revertly_home()}")
+    size = paths.store_size()
+    cfg = load_config(paths.config_path())
+    cap = f" / {cfg.max_disk_gb:g} GB cap" if cfg.max_disk_gb else ""
+    pct = ""
+    if cfg.max_disk_gb:
+        used = size / (cfg.max_disk_gb * 1e9) * 100
+        pct = f"  ({used:.0f}% of cap)" if used >= 1 else ""
+    print(f"sessions: {len(ids)}  disk: {_human(size)}{cap}{pct}  "
+          f"store: {paths.revertly_home()}")
+    if cfg.retention_days:
+        print(f"retention: keeping ~{cfg.retention_days}d "
+              f"(flagged sessions kept longer) — 'revertly clear' to prune now")
     for sid in ids[-5:][::-1]:
         m = _load_meta(sid) or {}
         flag = " [revert]" if m.get("is_revert") else ""
+        ev = " ⚠flagged" if m.get("flagged") else ""
         armed = "armed" if m.get("armed") else "UNARMED"
-        print(f"  {sid}{flag}  {m.get('name','?')}  ({armed})")
+        print(f"  {sid}{flag}{ev}  {m.get('name','?')}  "
+              f"({armed}, {_human(paths.session_size(sid))})")
     return 0
+
+
+def _human(n: float) -> str:
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024:
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 
 def cmd_last(args) -> int:
@@ -428,21 +451,99 @@ def cmd_resume(args) -> int:
     return 0
 
 
+def _parse_before(spec: str):
+    """A cutoff for --before: a session id, or an age like 7d/12h, or an
+    ISO-ish date (YYYY-MM-DD). Returns an epoch float, or None on parse error."""
+    from . import retention
+    s = spec.strip()
+    # a known session id -> that session's start time
+    if s in paths.list_session_ids():
+        m = _load_meta(s) or {}
+        return float(m.get("started") or 0.0)
+    low = s.lower()
+    try:
+        if low.endswith("d"):
+            return time.time() - float(low[:-1]) * 86400
+        if low.endswith("h"):
+            return time.time() - float(low[:-1]) * 3600
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return time.mktime(time.strptime(s, fmt))
+        except ValueError:
+            continue
+    return None
+
+
 def cmd_gc(args) -> int:
-    keep_days = args.keep
-    cutoff = time.time() - keep_days * 86400
-    removed = 0
-    for sid in paths.list_session_ids():
-        m = _load_meta(sid) or {}
-        started = m.get("started", 0)
-        trips = any(e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER)
-                    for e in Journal.read(paths.journal_path(sid)))
-        if started < cutoff and not trips:  # keep tripwire-flagged sessions longer
-            paths.append_incident("GC", f"pruned session {sid} (age policy)")
-            paths.rmtree_force(paths.session_dir(sid))  # clears immutable flags first
-            removed += 1
-    print(f"revertly gc: removed {removed} session(s) older than {keep_days}d "
-          f"(tripwire-flagged kept)")
+    from . import retention
+    cfg = load_config(paths.config_path())
+    max_bytes = int(cfg.max_disk_gb * 1e9) if cfg.max_disk_gb else None
+    before = None
+    if getattr(args, "before", None):
+        before = _parse_before(args.before)
+        if before is None:
+            print(f"revertly gc: bad --before {args.before!r} "
+                  f"(use a session id, 7d/12h, or YYYY-MM-DD)")
+            return 2
+    items = retention.plan(retention.collect(),
+                           keep_days=args.keep, max_disk_bytes=max_bytes,
+                           before=before)
+    removed = retention.apply(items)
+    freed = sum(i.size for i in items)
+    print(f"revertly gc: removed {removed} session(s), freed {_human(freed)} "
+          f"(kept ≤{args.keep}d"
+          f"{f', ≤{cfg.max_disk_gb:g}GB' if max_bytes else ''}; "
+          f"flagged/live kept)")
+    return 0
+
+
+def cmd_clear(args) -> int:
+    """The 'I'm at a safe point — clear history' command. Clears sessions by a
+    cutoff (--before) or ALL of them (--all), keeping the live session and
+    (unless --include-flagged) tripwire-flagged evidence."""
+    from . import retention
+    before = None
+    if args.before:
+        before = _parse_before(args.before)
+        if before is None:
+            print(f"revertly clear: bad --before {args.before!r} "
+                  f"(use a session id, 7d/12h, or YYYY-MM-DD)")
+            return 2
+    if not args.all and before is None and args.keep is None:
+        print("revertly clear: specify --all, --before <id|7d|date>, or "
+              "--keep <days>. Nothing cleared.")
+        return 2
+    items = retention.plan(
+        retention.collect(),
+        keep_days=args.keep,
+        before=before,
+        clear_all=args.all,
+        include_flagged=args.include_flagged)
+    if not items:
+        print("revertly clear: nothing matches — store already clean.")
+        return 0
+    freed = sum(i.size for i in items)
+    flagged = [i for i in items if i.flagged]
+    print(f"clear plan: {len(items)} session(s), {_human(freed)} to free")
+    for i in items[:10]:
+        tag = " ⚠flagged" if i.flagged else ""
+        print(f"  {i.id}{tag}  {_human(i.size)}  [{i.reason}]")
+    if len(items) > 10:
+        print(f"  … and {len(items) - 10} more")
+    if flagged:
+        print(f"  ⚠ {len(flagged)} FLAGGED (evidence) session(s) included")
+    if args.dry_run:
+        print("(dry-run: nothing changed)")
+        return 0
+    if not args.yes:
+        prompt = (f"PERMANENTLY clear {len(items)} session(s) "
+                  f"({_human(freed)})? This cannot be undone. [y/N] ")
+        if not _confirm(prompt):
+            print("aborted."); return 1
+    removed = retention.apply(items)
+    print(f"cleared {removed} session(s), freed {_human(freed)}.")
     return 0
 
 
@@ -641,8 +742,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("pause").set_defaults(func=cmd_pause)
     sub.add_parser("resume").set_defaults(func=cmd_resume)
 
-    gc = sub.add_parser("gc"); gc.add_argument("--keep", type=int, default=30)
+    gc = sub.add_parser("gc", help="enforce retention policy (age + disk cap)")
+    gc.add_argument("--keep", type=int, default=30, help="keep sessions ≤ N days")
+    gc.add_argument("--before", help="also prune before a session id / 7d / YYYY-MM-DD")
     gc.set_defaults(func=cmd_gc)
+
+    cl = sub.add_parser("clear",
+                        help="clear stored history at a safe point (frees disk)")
+    cl.add_argument("--all", action="store_true",
+                    help="clear ALL sessions (keeps the live one)")
+    cl.add_argument("--before", help="clear before a session id / 7d / YYYY-MM-DD")
+    cl.add_argument("--keep", type=int, help="clear everything older than N days")
+    cl.add_argument("--include-flagged", action="store_true",
+                    help="also clear tripwire-flagged (evidence) sessions")
+    cl.add_argument("--dry-run", action="store_true")
+    cl.add_argument("--yes", "-y", action="store_true")
+    cl.set_defaults(func=cmd_clear)
 
     vf = sub.add_parser("verify")
     vf.add_argument("session", nargs="?")
