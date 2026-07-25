@@ -102,6 +102,36 @@
     padding: 12px 18px; border-top: 1px solid var(--line); }
   .modal .foot button { padding: 8px 16px; }
   button.act:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); }
+
+  /* Storage — interactive point-and-clear session list */
+  .srow { display: flex; align-items: center; gap: 12px; padding: 9px 12px;
+    border-bottom: 1px solid var(--line); cursor: pointer; font-size: 13px;
+    border-left: 3px solid transparent; }
+  .srow:last-child { border-bottom: 0; }
+  .srow:hover { background: var(--panel2); }
+  .srow .when { color: var(--fg); min-width: 190px; }
+  .srow .age { color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .srow .sid { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    color: var(--muted); flex: 1; word-break: break-all; }
+  .srow .sz { color: var(--accent); min-width: 68px; text-align: right; }
+  .srow .rb { font-size: 11px; padding: 1px 7px; border-radius: 10px; }
+  .srow.cutoff { border-left-color: var(--ok); background: rgba(90,230,160,.06); }
+  .srow.staged { border-left-color: var(--alert); }
+  .srow.staged .when, .srow.staged .sid { text-decoration: line-through; opacity: .55; }
+  .srow.staged .sz { color: var(--alert); }
+  .srow.protected-in-range { border-left-color: var(--warn); cursor: default; }
+  .badge-keep { background: rgba(90,230,160,.18); color: var(--ok); }
+  .badge-prot { background: rgba(230,180,90,.18); color: var(--warn); }
+  .badge-live { background: rgba(90,230,160,.15); color: var(--ok); }
+  .badge-rev  { background: rgba(90,169,230,.18); color: var(--accent); }
+  .clear-divider { padding: 5px 12px; font-size: 11px; color: var(--alert);
+    border-bottom: 1px solid var(--line); background: rgba(255,92,92,.06); }
+  .chip.active { border-color: var(--accent); background: var(--panel2); color: var(--fg); }
+  .clear-bar { position: sticky; bottom: 0; display: flex; align-items: center;
+    gap: 14px; padding: 12px 16px; background: var(--panel);
+    border: 1px solid var(--alert); border-radius: 8px; margin-top: 12px;
+    box-shadow: 0 -6px 20px rgba(0,0,0,.35); }
+  .clear-bar .grow { flex: 1; }
 </style>
 
 <header>
@@ -174,23 +204,17 @@
   <section id="tab-storage" class="tab">
     <div id="storage-summary" class="card" style="padding:14px 16px"></div>
     <div class="card" style="padding:14px 16px">
-      <div class="name" style="margin-bottom:8px">Clear history at a safe point</div>
-      <div class="sub" style="margin-bottom:12px">Reverts and pre-image clones pile up. When you've committed / shipped and don't need the undo history, clear it — the live session and flagged (evidence) sessions are protected.</div>
-      <div class="toolbar">
-        <select id="clear-mode">
-          <option value="before">clear everything before…</option>
-          <option value="keep">clear older than N days…</option>
-          <option value="all">clear ALL history</option>
-        </select>
-        <select id="clear-before"></select>
-        <input type="text" id="clear-keep" placeholder="days" style="display:none;width:90px">
-        <label class="chk" style="display:inline-flex"><input type="checkbox" id="clear-flagged"> include flagged (evidence)</label>
-        <button class="act" id="clear-preview">Preview</button>
-        <button class="act danger" id="clear-go">Clear…</button>
+      <div class="name" style="margin-bottom:6px">Clear history at a safe point</div>
+      <div class="sub" style="margin-bottom:12px">Click a session to set your safe point — everything <b>older</b> is cleared. The live session and flagged (evidence) sessions are protected.</div>
+      <div class="toolbar" style="margin-bottom:10px">
+        <input type="text" id="storage-filter" placeholder="filter — id or date…" style="flex:1;min-width:180px">
+        <button class="act mini chip" data-chip="7">older than 7d</button>
+        <button class="act mini chip" data-chip="30">older than 30d</button>
+        <button class="act mini chip" data-chip="all">everything</button>
       </div>
-      <div class="summary" id="clear-summary" style="display:none"></div>
+      <div id="storage-rows"></div>
+      <div id="clear-actionbar" class="clear-bar" style="display:none"></div>
     </div>
-    <div id="storage-list"></div>
   </section>
 
   <section id="tab-live" class="tab">
@@ -640,20 +664,29 @@ document.getElementById("rev-execute").addEventListener("click", function(){
   });
 });
 
-// ---- Storage ----
+// ---- Storage (interactive point-and-clear) ----
 function human(n) {
   if (n == null) return "—";
   var u = ["B","KB","MB","GB","TB"], i = 0;
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return (i === 0 ? n : n.toFixed(1)) + " " + u[i];
 }
-var storageData = null;
+function relAge(sec) {
+  if (!sec) return "";
+  var d = Date.now() / 1000 - sec;
+  if (d < 60) return "just now";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+var storageData = { sessions: [] };
+var clearState = { cutoff: null, includeFlagged: false, filter: "" };
+
 function loadStorage() {
   getJSON("/api/storage").then(function(res){
-    storageData = res.body || {};
+    storageData = res.body || { sessions: [] };
     renderStorageSummary();
-    populateClearBefore();
-    renderStorageList();
+    renderStorageRows();
   });
 }
 function renderStorageSummary() {
@@ -672,56 +705,98 @@ function renderStorageSummary() {
   if (d.oldest) bits.push("oldest " + fmtTime(d.oldest));
   box.appendChild(el("div", "sub", bits.join("  ·  ")));
 }
-function populateClearBefore() {
-  var sel = document.getElementById("clear-before");
-  sel.innerHTML = "";
-  (storageData.sessions || []).forEach(function(s){
-    var o = el("option"); o.value = s.id;
-    o.textContent = fmtTime(s.started) + "  " + s.id + (s.flagged ? "  ⚠" : "");
-    sel.appendChild(o);
-  });
+function sessById(id) { return (storageData.sessions || []).find(function(s){ return s.id === id; }); }
+function isProtected(s) { return s.live || (s.flagged && !clearState.includeFlagged); }
+function isOlderThanCutoff(s) {
+  var c = clearState.cutoff; if (!c) return false;
+  if (c.type === "all") return true;
+  if (c.type === "days") return s.started < (Date.now() / 1000 - c.days * 86400);
+  if (c.type === "before") { var b = sessById(c.id); return !!b && s.started < b.started; }
+  return false;
 }
-function renderStorageList() {
-  var list = document.getElementById("storage-list"); list.innerHTML = "";
-  var card = el("div", "card");
-  (storageData.sessions || []).forEach(function(s){
-    var line = el("div", "hit");
-    line.appendChild(el("span", "k", human(s.size)));
-    line.appendChild(el("span", "p", s.id + (s.flagged ? "  ⚠flagged" : "") + (s.is_revert ? "  ↩revert" : "") + (s.live ? "  ●live" : "")));
-    card.appendChild(line);
-  });
-  if (!(storageData.sessions || []).length) card.appendChild(el("div", "empty", "No sessions stored."));
-  list.appendChild(card);
+function stagedList() { return (storageData.sessions || []).filter(function(s){ return isOlderThanCutoff(s) && !isProtected(s); }); }
+function protectedInRange() { return (storageData.sessions || []).filter(function(s){ return isOlderThanCutoff(s) && isProtected(s); }); }
+function storageMatches(s) {
+  var q = clearState.filter; if (!q) return true;
+  return matches(s.id, q) || matches(new Date(s.started * 1000).toLocaleString(), q);
 }
-document.getElementById("clear-mode").addEventListener("change", function(){
-  var m = this.value;
-  document.getElementById("clear-before").style.display = (m === "before") ? "" : "none";
-  document.getElementById("clear-keep").style.display = (m === "keep") ? "" : "none";
-});
-function clearRequestBody(dry) {
-  var m = document.getElementById("clear-mode").value;
-  var body = { dry_run: dry, include_flagged: document.getElementById("clear-flagged").checked };
-  if (m === "all") body.all = true;
-  else if (m === "before") body.before = document.getElementById("clear-before").value;
-  else if (m === "keep") body.keep_days = parseFloat(document.getElementById("clear-keep").value || "0");
+function renderStorageRows() {
+  var host = document.getElementById("storage-rows"); host.innerHTML = "";
+  var rows = (storageData.sessions || []).filter(storageMatches);
+  if (!rows.length) { host.appendChild(el("div", "empty", "No sessions match.")); renderClearBar(); return; }
+  var staged = stagedList(), freedTotal = staged.reduce(function(a,x){ return a + x.size; }, 0);
+  var dividerShown = false;
+  rows.forEach(function(s){
+    var older = isOlderThanCutoff(s), c = clearState.cutoff;
+    if (older && !dividerShown) {
+      host.appendChild(el("div", "clear-divider", "── clearing " + staged.length + " older session(s) below · " + human(freedTotal) + " ──"));
+      dividerShown = true;
+    }
+    var cls = "srow";
+    var isCutoff = c && c.type === "before" && c.id === s.id;
+    if (isCutoff) cls += " cutoff";
+    else if (older && isProtected(s)) cls += " protected-in-range";
+    else if (older) cls += " staged";
+    var row = el("div", cls);
+    var when = el("span", "when");
+    when.appendChild(el("span", null, new Date(s.started * 1000).toLocaleString()));
+    when.appendChild(el("span", "age", relAge(s.started)));
+    row.appendChild(when);
+    row.appendChild(el("span", "sid", s.id));
+    if (s.live) row.appendChild(el("span", "rb badge-live", "● live"));
+    else if (s.flagged) row.appendChild(el("span", "rb badge-prot", "🛡 evidence"));
+    if (s.is_revert) row.appendChild(el("span", "rb badge-rev", "↩ revert"));
+    if (isCutoff) row.appendChild(el("span", "rb badge-keep", "✓ keep from here"));
+    row.appendChild(el("span", "sz", human(s.size)));
+    if (!s.live) {
+      row.addEventListener("click", function(){
+        clearState.cutoff = isCutoff ? null : { type: "before", id: s.id };
+        syncChips(); renderStorageRows();
+      });
+    } else { row.style.cursor = "default"; }
+    host.appendChild(row);
+  });
+  renderClearBar();
+}
+function renderClearBar() {
+  var bar = document.getElementById("clear-actionbar");
+  var staged = stagedList();
+  if (!clearState.cutoff || !staged.length) { bar.style.display = "none"; bar.innerHTML = ""; return; }
+  bar.style.display = ""; bar.innerHTML = "";
+  var freed = staged.reduce(function(a,x){ return a + x.size; }, 0);
+  var prot = protectedInRange();
+  var info = el("div", "grow");
+  info.appendChild(el("div", "name", "Clear " + staged.length + " session(s) · " + human(freed)));
+  var protFlagged = prot.filter(function(s){ return s.flagged && !s.live; }).length;
+  var note = prot.length
+    ? (prot.length + " protected in range (live/evidence)" + (protFlagged ? " — tick to include evidence" : ""))
+    : "the live session is always kept";
+  info.appendChild(el("div", "sub", note));
+  bar.appendChild(info);
+  var lab = el("label", "chk"); lab.style.cssText = "display:inline-flex";
+  var cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = clearState.includeFlagged;
+  cb.addEventListener("change", function(){ clearState.includeFlagged = cb.checked; renderStorageRows(); });
+  lab.appendChild(cb); lab.appendChild(el("span", null, "include flagged"));
+  bar.appendChild(lab);
+  var cancel = el("button", "act", "Cancel");
+  cancel.addEventListener("click", function(){ clearState.cutoff = null; syncChips(); renderStorageRows(); });
+  bar.appendChild(cancel);
+  var go = el("button", "act danger", "Clear…");
+  go.addEventListener("click", doClear);
+  bar.appendChild(go);
+}
+function clearRequest(dry) {
+  var c = clearState.cutoff, body = { dry_run: dry, include_flagged: clearState.includeFlagged };
+  if (c.type === "all") body.all = true;
+  else if (c.type === "days") body.keep_days = c.days;
+  else if (c.type === "before") body.before = c.id;
   return body;
 }
-function clearPreview(cb) {
-  var summ = document.getElementById("clear-summary");
-  summ.style.display = ""; summ.textContent = "Previewing…";
-  postJSON("/api/clear", clearRequestBody(true)).then(function(res){
-    summ.innerHTML = "";
-    if (!res.ok) { summ.appendChild(el("div", "err-note", (res.body && res.body.error) || ("error " + res.status))); return; }
+function doClear() {
+  postJSON("/api/clear", clearRequest(true)).then(function(res){
+    if (!res.ok) { uiAlert("Preview failed: " + ((res.body && res.body.error) || res.status)); return; }
     var b = res.body;
-    summ.appendChild(el("div", "name", b.count + " session(s), " + human(b.freed_bytes) + " to free"));
-    if (b.flagged_count) summ.appendChild(el("div", "err-note", "⚠ " + b.flagged_count + " flagged (evidence) session(s) included"));
-    if (cb) cb(b);
-  });
-}
-document.getElementById("clear-preview").addEventListener("click", function(){ clearPreview(null); });
-document.getElementById("clear-go").addEventListener("click", function(){
-  clearPreview(function(b){
-    if (!b.count) { uiAlert("Nothing to clear — store already clean for this selection."); return; }
+    if (!b.count) { uiAlert("Nothing to clear for this selection."); return; }
     uiConfirm({
       title: "Permanently clear " + b.count + " session(s)?",
       danger: true, confirmText: "Clear " + human(b.freed_bytes),
@@ -730,12 +805,31 @@ document.getElementById("clear-go").addEventListener("click", function(){
               b.flagged_count ? ("⚠ includes " + b.flagged_count + " flagged evidence session(s) — type \"clear evidence\" to confirm.") : null ]
     }).then(function(ok){
       if (!ok) return;
-      postJSON("/api/clear", clearRequestBody(false)).then(function(res){
-        if (!res.ok) { uiAlert("Clear failed: " + ((res.body && res.body.error) || res.status)); return; }
-        uiAlert({ title: "Cleared ✓", body: ["Freed " + human(res.body.freed_bytes) + " across " + res.body.removed + " session(s)."] });
-        loadStorage(); loadTimeline();
+      postJSON("/api/clear", clearRequest(false)).then(function(r2){
+        if (!r2.ok) { uiAlert("Clear failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
+        uiAlert({ title: "Cleared ✓", body: ["Freed " + human(r2.body.freed_bytes) + " across " + r2.body.removed + " session(s)."] });
+        clearState.cutoff = null; loadStorage(); loadTimeline();
       });
     });
+  });
+}
+function syncChips() {
+  document.querySelectorAll("#tab-storage .chip").forEach(function(ch){
+    var c = clearState.cutoff;
+    var active = !!c && ((ch.dataset.chip === "all" && c.type === "all") ||
+                         (c.type === "days" && String(c.days) === ch.dataset.chip));
+    ch.classList.toggle("active", active);
+  });
+}
+document.getElementById("storage-filter").addEventListener("input", debounce(function(){
+  clearState.filter = document.getElementById("storage-filter").value; renderStorageRows();
+}, 120));
+document.querySelectorAll("#tab-storage .chip").forEach(function(ch){
+  ch.addEventListener("click", function(){
+    var v = ch.dataset.chip;
+    if (v === "all") clearState.cutoff = (clearState.cutoff && clearState.cutoff.type === "all") ? null : { type: "all" };
+    else { var d = parseInt(v, 10); clearState.cutoff = (clearState.cutoff && clearState.cutoff.type === "days" && clearState.cutoff.days === d) ? null : { type: "days", days: d }; }
+    syncChips(); renderStorageRows();
   });
 });
 
