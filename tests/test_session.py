@@ -71,6 +71,27 @@ class TestArmSeal(SessionBase):
         self.assertEqual(ctx.exception.policy, "abort")
 
 
+class TestStoreHardening(SessionBase):
+    def test_store_root_is_0700(self):
+        del os.environ["REVERTLY_NO_HARDEN"]      # exercise real hardening
+        try:
+            paths.ensure_store()
+            import stat as _stat
+            mode = _stat.S_IMODE(os.stat(paths.revertly_home()).st_mode)
+            self.assertEqual(mode, 0o700,
+                             "store root must be 0700 so other users can't "
+                             "traverse into clones holding secrets")
+        finally:
+            os.environ["REVERTLY_NO_HARDEN"] = "1"
+
+    def test_append_incident_records_line(self):
+        paths.append_incident("RM", "deleted session xyz")
+        with open(paths.incidents_log()) as f:
+            body = f.read()
+        self.assertIn("RM", body)
+        self.assertIn("deleted session xyz", body)
+
+
 class TestShimArmFailure(SessionBase):
     def test_abort_policy_does_not_run_command(self):
         # C1: on_arm_failure=abort must REFUSE to run the wrapped command,

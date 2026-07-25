@@ -165,6 +165,30 @@ class TestReopen(unittest.TestCase):
             self.assertIsNone(e.prev_hash)
 
 
+class TestTruncationAnchor(unittest.TestCase):
+    def test_verify_sealed_detects_truncation(self):
+        # a clean-prefix truncation passes verify() but must FAIL
+        # verify_sealed() against the recorded final seq (injection HIGH-2).
+        with tempfile.TemporaryDirectory() as d:
+            jp = os.path.join(d, "journal.jsonl")
+            seal = os.path.join(d, "journal.seal")
+            j = Journal(jp)
+            for _ in range(5):
+                j.heartbeat()
+            with open(seal, "w") as f:
+                json.dump({"seq": j._last_seq, "hash": j._last_hash}, f)
+            # sanity: intact
+            self.assertEqual(Journal.verify_sealed(jp, seal), (True, None))
+            # attacker truncates the last 2 records (still a clean prefix)
+            lines = open(jp).read().splitlines()
+            with open(jp, "w") as f:
+                f.write("\n".join(lines[:3]) + "\n")
+            self.assertEqual(Journal.verify(jp)[0], True)   # chain alone: OK
+            ok, reason = Journal.verify_sealed(jp, seal)
+            self.assertFalse(ok)                            # anchor: caught
+            self.assertIn("truncated", reason)
+
+
 class TestConcurrentAppend(unittest.TestCase):
     def test_parallel_appends_keep_chain_intact(self):
         # arm() runs one watcher thread per root, all calling append().

@@ -147,3 +147,35 @@ class Journal:
                 prev_hash = stored
                 expected_seq += 1
         return (True, None)
+
+    @staticmethod
+    def verify_sealed(journal_path, seal_path):
+        """Chain verify PLUS truncation detection against the immutable seal
+        anchor written at seal(). Returns (ok, reason):
+          * chain broken            -> (False, "chain breaks at seq N")
+          * journal shorter than    -> (False, "truncated: N of M records")
+            the sealed final seq        (the clean-prefix cut verify() alone
+                                         would accept)
+          * final hash mismatch     -> (False, "final record altered")
+          * no seal (unsealed/live) -> chain result only
+        """
+        ok, bad = Journal.verify(journal_path)
+        if not ok:
+            return (False, f"chain breaks at seq {bad}")
+        if not os.path.exists(seal_path):
+            return (True, None)   # never sealed (still running / old session)
+        try:
+            with open(seal_path) as f:
+                sealed = json.load(f)
+        except (OSError, ValueError):
+            return (True, None)
+        last_seq, last_hash = None, None
+        for e in Journal.read(journal_path):
+            last_seq, last_hash = e.seq, e.hash
+        want_seq = sealed.get("seq")
+        if want_seq is not None and (last_seq is None or last_seq < want_seq):
+            return (False,
+                    f"truncated: {(last_seq or -1) + 1} of {want_seq + 1} records")
+        if sealed.get("hash") and last_hash != sealed.get("hash"):
+            return (False, "final record altered or removed")
+        return (True, None)

@@ -58,7 +58,12 @@ class Config:
         return self._expand(self.tripwire_paths) + self._expand(SELF_TAMPER_GLOBS)
 
     def self_tamper_globs(self) -> list:
-        return self._expand(SELF_TAMPER_GLOBS)
+        # Include the ACTUAL store location, not just the hard-coded
+        # ~/.revertly — a custom $REVERTLY_HOME must still be self-protected.
+        from revertly import paths
+        home = paths.revertly_home()
+        dynamic = [home, os.path.join(home, "**")]
+        return self._expand(SELF_TAMPER_GLOBS) + dynamic
 
     # ---- config-weakening detection (security) ----
 

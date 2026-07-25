@@ -205,6 +205,11 @@ def cmd_rm(args) -> int:
                         f"{total/1e6:.1f} MB — no revert possible? [y/N] "):
             print("aborted."); return 1
     for sid in args.sessions:
+        trips = sum(1 for e in Journal.read(paths.journal_path(sid))
+                    if e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER))
+        paths.append_incident(
+            "RM", f"permanently deleted session {sid}"
+                  f"{' (FLAGGED evidence)' if trips else ''}")
         paths.rmtree_force(paths.session_dir(sid))
         print(f"deleted {sid}")
     return 0
@@ -336,6 +341,7 @@ def cmd_config(args) -> int:
 def cmd_pause(args) -> int:
     paths.ensure_store()
     open(_pause_flag(), "w").close()
+    paths.append_incident("PAUSE", "revertly disarmed via 'revertly pause'")
     print("revertly: paused (claude runs unprotected until 'revertly resume')")
     return 0
 
@@ -359,6 +365,7 @@ def cmd_gc(args) -> int:
         trips = any(e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER)
                     for e in Journal.read(paths.journal_path(sid)))
         if started < cutoff and not trips:  # keep tripwire-flagged sessions longer
+            paths.append_incident("GC", f"pruned session {sid} (age policy)")
             paths.rmtree_force(paths.session_dir(sid))  # clears immutable flags first
             removed += 1
     print(f"revertly gc: removed {removed} session(s) older than {keep_days}d "
@@ -376,13 +383,13 @@ def cmd_verify(args) -> int:
     bad = 0
     for sid in sids:
         jp = paths.journal_path(sid)
-        okc, seq = Journal.verify(jp)
+        okc, reason = Journal.verify_sealed(jp, paths.seal_path(sid))
         sealed = "immutable" if paths.is_immutable(jp) else "mutable"
         if okc:
             print(f"  OK        {sid}  ({sealed})")
         else:
             bad += 1
-            print(f"  TAMPERED  {sid}  chain breaks at seq {seq}  ({sealed})")
+            print(f"  TAMPERED  {sid}  {reason}  ({sealed})")
     print(f"\nverified {len(sids)} session(s): "
           f"{len(sids) - bad} intact, {bad} tampered")
     return 1 if bad else 0

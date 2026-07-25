@@ -164,10 +164,14 @@ def run_wrapped(cmd: List[str]) -> int:
         print("revertly shim: no command given", file=sys.stderr)
         return 2
 
-    # escape hatches
+    # escape hatches — logged, so bypassing the net is never fully silent
     if os.environ.get("REVERTLY_DISABLE"):
+        paths.append_incident("BYPASS", f"REVERTLY_DISABLE set; ran unprotected: "
+                                        f"{' '.join(cmd[:3])}")
         return _exec_unprotected(cmd, reason="REVERTLY_DISABLE set")
     if os.path.exists(os.path.join(paths.revertly_home(), "paused")):
+        paths.append_incident("BYPASS", f"revertly paused; ran unprotected: "
+                                        f"{' '.join(cmd[:3])}")
         return _exec_unprotected(cmd, reason="revertly is paused")
 
     cfg = load_config(paths.config_path())

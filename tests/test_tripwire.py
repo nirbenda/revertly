@@ -33,6 +33,24 @@ class TestSelfTamper(unittest.TestCase):
         self.assertIsNotNone(hit)
         self.assertTrue(hit.self_tamper)
 
+    def test_custom_revertly_home_is_self_tamper(self):
+        # regression: self-tamper globs were hard-coded to ~/.revertly and
+        # missed a custom $REVERTLY_HOME entirely, so SELF_TAMPER never fired
+        # under a temp store (tests, CI, non-default installs).
+        old = os.environ.get("REVERTLY_HOME")
+        os.environ["REVERTLY_HOME"] = "/tmp/custom-revertly-store"
+        try:
+            engine = TripwireEngine(Config())
+            hit = engine.check(
+                "/tmp/custom-revertly-store/sessions/x/clone/f.txt", FsOp.DELETE)
+            self.assertIsNotNone(hit)
+            self.assertTrue(hit.self_tamper)
+        finally:
+            if old is None:
+                os.environ.pop("REVERTLY_HOME", None)
+            else:
+                os.environ["REVERTLY_HOME"] = old
+
     def test_zshrc_is_self_tamper(self):
         hit = self.engine.check(home(".zshrc"), FsOp.WRITE)
         self.assertIsNotNone(hit)

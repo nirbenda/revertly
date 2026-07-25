@@ -74,6 +74,10 @@ class Session:
                 w = _make_watcher(self.cfg)
                 w.start(root, self._on_event)
                 self._watchers.append(w)
+            # dedicated SELF_TAMPER sentinels: watch revertly's OWN state so
+            # disabling/blinding/destroying it is no longer silent.
+            for w in self._self_tamper_watchers():
+                self._watchers.append(w)
 
         self.meta = SessionMeta(
             id=self.id, name=self.name, cwd=self.cwd, argv=self.argv,
@@ -105,6 +109,38 @@ class Session:
                 roots.append(p)
         return roots
 
+    def _self_tamper_watchers(self) -> list:
+        """Start watchers on revertly's own sentinel state. These bypass the
+        revertly-home exclude the project watcher uses, but are kept to a
+        tiny, self-noise-free set (revertly never writes these DURING a
+        session, so they never flag our own activity):
+
+          * this session's clone/  — the revert source (delete = sabotage)
+          * bin/                    — the shim (removal/replacement)
+          * store root: only config.toml + paused (blind/disable sentinels)
+          * $HOME: only the shell-rc files (persistence + PATH hijack)
+        """
+        started = []
+        home = paths.revertly_home()
+        userhome = os.path.expanduser("~")
+        # full-watch roots revertly doesn't write during a session
+        for root in (paths.clone_dir(self.id), paths.bin_dir()):
+            if os.path.isdir(root):
+                w = _make_plain_watcher(self.cfg)
+                w.start(root, self._on_event)
+                started.append(w)
+        # allowlist watchers: scan a dir but only report specific sentinels
+        store_allow = {paths.config_path(), os.path.join(home, "paused")}
+        rc_allow = {os.path.join(userhome, n) for n in
+                    (".zshrc", ".zprofile", ".zshenv",
+                     ".bashrc", ".bash_profile", ".profile")}
+        for root, allow in ((home, store_allow), (userhome, rc_allow)):
+            if os.path.isdir(root):
+                w = _make_allowlist_watcher(allow)
+                w.start(root, self._on_event)
+                started.append(w)
+        return started
+
     def _handle_arm_failure(self, exc: Exception):
         policy = self.cfg.on_arm_failure
         if policy == "proceed":
@@ -118,16 +154,21 @@ class Session:
     # ─────────────────────── event handling ───────────────────────
 
     def _on_event(self, e: Event):
-        """Watcher callback. Enrich fs events with tripwire classification."""
-        if e.path and self.cfg.is_excluded(e.path):
-            return
-        if e.path and e.op:
-            hit = self._tripwire.check(e.path, e.op)
-            if hit:
-                e.kind = EventKind.SELF_TAMPER if hit.self_tamper else EventKind.TRIPWIRE
-                e.severity = Severity.ALERT
-                e.detail = f"matched {hit.pattern}"
-                self._notify(e, hit)
+        """Watcher callback. Enrich fs events with tripwire classification.
+
+        Order matters: classify FIRST, then apply the exclude filter only to
+        non-tripwire events. Otherwise a SELF_TAMPER/TRIPWIRE hit on a path
+        that also matches an exclude glob (e.g. ~/.revertly/**) would be
+        silently dropped — which is exactly how self-defense was dead before.
+        """
+        hit = self._tripwire.check(e.path, e.op) if (e.path and e.op) else None
+        if hit is None and e.path and self.cfg.is_excluded(e.path):
+            return  # ordinary excluded churn — drop
+        if hit:
+            e.kind = EventKind.SELF_TAMPER if hit.self_tamper else EventKind.TRIPWIRE
+            e.severity = Severity.ALERT
+            e.detail = f"matched {hit.pattern}"
+            self._notify(e, hit)
         if self._journal:
             self._journal.append(e)
 
@@ -181,6 +222,14 @@ class Session:
                 pass
         if self._journal:
             self._journal.heartbeat()
+            # Immutable truncation anchor: record the final seq/hash so verify()
+            # can detect a clean-prefix cut (which the chain alone accepts).
+            try:
+                with open(paths.seal_path(self.id), "w") as f:
+                    json.dump({"seq": self._journal._last_seq,
+                               "hash": self._journal._last_hash}, f)
+            except OSError:
+                pass
         if self.meta:
             self.meta.ended = time.time()
             self.meta.exit_code = exit_code
@@ -190,6 +239,7 @@ class Session:
         # step, and the hash chain still catches content edits either way.
         paths.make_immutable(paths.journal_path(self.id))
         paths.make_immutable(paths.meta_path(self.id))
+        paths.make_immutable(paths.seal_path(self.id))
         return self.meta
 
     def summary_line(self) -> str:
@@ -242,6 +292,32 @@ def _default_cloner():
 
 def _make_watcher(cfg: Config):
     from .watch import PollingWatcher
+    home = paths.revertly_home()
+
     def ignore(path):
-        return cfg.is_excluded(path) or path.startswith(paths.revertly_home())
+        return cfg.is_excluded(path) or paths.is_under(path, home)
     return PollingWatcher(interval=cfg.poll_interval, should_ignore=ignore)
+
+
+def _make_plain_watcher(cfg: Config):
+    """A watcher with no ignore — used for sentinel roots (clone/, bin/) that
+    revertly does not write during a session, so there is nothing to ignore."""
+    from .watch import PollingWatcher
+    return PollingWatcher(interval=cfg.poll_interval)
+
+
+def _make_allowlist_watcher(allowed: set):
+    """A watcher that prunes ALL subdirectories (no descent) and reports only
+    the explicit sentinel files in `allowed`. Cheap: one listing of the root,
+    stat of a handful of files. Used for the store root (config.toml, paused)
+    and $HOME (shell-rc files) so those specific paths are watched without
+    journaling everything around them."""
+    from .watch import PollingWatcher
+    allowed = {os.path.abspath(p) for p in allowed}
+
+    def ignore(path):
+        ap = os.path.abspath(path)
+        if os.path.isdir(ap):
+            return True                    # never descend
+        return ap not in allowed           # only the sentinels are reported
+    return PollingWatcher(interval=0.5, should_ignore=ignore)

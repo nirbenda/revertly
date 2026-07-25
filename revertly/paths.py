@@ -64,6 +64,12 @@ def meta_path(session_id: str) -> str:
     return os.path.join(session_dir(session_id), "meta.json")
 
 
+def seal_path(session_id: str) -> str:
+    # immutable anchor written at seal: the final {seq, hash}. Lets verify()
+    # detect TRUNCATION (a clean-prefix cut that the hash chain alone accepts).
+    return os.path.join(session_dir(session_id), "journal.seal")
+
+
 def is_under(path: str, root: str) -> bool:
     """True if `path` equals `root` or lies beneath it (string-prefix on
     normalized paths — callers pass already-normalized/realpathed values).
@@ -81,8 +87,31 @@ def ensure_dir(path: str) -> str:
 
 
 def ensure_store() -> None:
-    for d in (revertly_home(), sessions_root(), mirror_root(), bin_dir()):
+    home = revertly_home()
+    for d in (home, sessions_root(), mirror_root(), bin_dir()):
         ensure_dir(d)
+    # The store holds full clones of projects — including any secrets they
+    # contain (.env, keys). Lock the root to 0700 so no OTHER local user can
+    # traverse in, regardless of inner file perms (default umask leaves clone
+    # files 0644). One chmod on the root is sufficient: 0700 blocks traversal.
+    try:
+        os.chmod(home, 0o700)
+    except OSError:
+        pass
+
+
+def append_incident(tag: str, detail: str) -> None:
+    """Append a line to the cross-session incident log. Used for tripwire
+    hits AND for destructive/disable actions (rm, gc, purge, pause, disable)
+    so they can never happen silently. Best-effort; never raises."""
+    import time as _time
+    try:
+        ensure_store()
+        line = f"{_time.strftime('%Y-%m-%dT%H:%M:%S')}\t-\t{tag}\t{detail}\n"
+        with open(incidents_log(), "a") as f:
+            f.write(line)
+    except OSError:
+        pass
 
 
 def list_session_ids() -> list:
