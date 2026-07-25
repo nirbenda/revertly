@@ -69,8 +69,11 @@
   pre.diff .add { color: var(--ok); }
   pre.diff .del { color: var(--alert); }
   pre.diff .hd { color: var(--accent); }
-  .checkline { padding: 6px 14px; border-bottom: 1px solid var(--line); font-family: ui-monospace, monospace; font-size: 12px; }
+  .checkline { padding: 6px 14px; border-bottom: 1px solid var(--line); font-family: ui-monospace, monospace; font-size: 12px; display: flex; align-items: center; gap: 8px; }
   .checkline:last-child { border-bottom: 0; }
+  .checkline label.chk { flex: 1; min-width: 0; }
+  .checkline label.chk span { word-break: break-all; }
+  .file-view { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
   .summary { margin-top: 12px; padding: 12px 14px; background: var(--panel2); border-radius: 8px; }
   .cli { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; margin-top: 6px; }
   .empty { color: var(--muted); padding: 20px 0; }
@@ -578,7 +581,8 @@ document.getElementById("diff-dl-cur").addEventListener("click", function(){
 // ---- Revert composer ----
 function loadRevertPaths() {
   var sel = document.getElementById("rev-session"); if (!sel.value) return;
-  changedPathsFor(sel.value, function(paths){
+  var sid = sel.value;
+  changedPathsFor(sid, function(paths){
     var box = document.getElementById("rev-paths"); box.innerHTML = "";
     if (!paths.length) { box.appendChild(el("div", "empty", "No changed paths.")); return; }
     paths.forEach(function(p){
@@ -586,15 +590,55 @@ function loadRevertPaths() {
       var lab = el("label", "chk");
       var cb = document.createElement("input"); cb.type = "checkbox"; cb.value = p; cb.checked = true;
       lab.appendChild(cb); lab.appendChild(el("span", null, p));
-      line.appendChild(lab); box.appendChild(line);
+      line.appendChild(lab);
+      // inspect WITHOUT reverting — matters most for deleted files, which
+      // exist nowhere else. "view" shows the pre-image (its content before the
+      // session); "⬇" downloads that pre-image; "diff" opens pre-vs-now.
+      var bView = el("button", "act mini", "view");
+      bView.addEventListener("click", function(){ viewPreimage(sid, p); });
+      var bDl = el("button", "act mini", "pre ⬇");
+      bDl.addEventListener("click", function(){ window.open(fileURL(sid, p, "pre")); });
+      var bDiff = el("button", "act mini", "diff");
+      bDiff.addEventListener("click", function(){ jumpToDiff(sid, p); });
+      line.appendChild(bView); line.appendChild(bDl); line.appendChild(bDiff);
+      box.appendChild(line);
     });
     applyRevFilter();
+  });
+}
+// Show a file's pre-image (content before the session) in a read-only modal,
+// without reverting. Uses the diff endpoint, which returns the pre bytes.
+function viewPreimage(sid, path) {
+  getJSON("/api/session/" + encodeURIComponent(sid) + "/diff?path=" + encodeURIComponent(path)).then(function(res){
+    if (!res.ok) { uiAlert("Can't load pre-image: " + ((res.body && res.body.error) || res.status)); return; }
+    var b = res.body;
+    var overlay = el("div", "modal-overlay");
+    var boxm = el("div", "modal");
+    boxm.appendChild(el("h3", null, "pre-image · " + path.split("/").pop()));
+    var body = el("div", "body");
+    body.appendChild(el("div", "sub", path + (b.pre_binary ? "  (binary — download to inspect)" : "")));
+    var pre = el("pre", "file-view", (b.pre != null && b.pre !== "") ? b.pre : "(empty — the pre-image has no content)");
+    body.appendChild(pre);
+    boxm.appendChild(body);
+    var foot = el("div", "foot");
+    var dl = el("button", "act", "Download pre ⬇");
+    dl.addEventListener("click", function(){ window.open(fileURL(sid, path, "pre")); });
+    var close = el("button", "act primary", "Close");
+    function shut(){ if (overlay.parentNode) document.body.removeChild(overlay); }
+    close.addEventListener("click", shut);
+    foot.appendChild(dl); foot.appendChild(close);
+    boxm.appendChild(foot);
+    overlay.appendChild(boxm);
+    overlay.addEventListener("click", function(e){ if (e.target === overlay) shut(); });
+    document.body.appendChild(overlay);
   });
 }
 function applyRevFilter() {
   var q = document.getElementById("rev-filter").value;
   document.querySelectorAll("#rev-paths .checkline").forEach(function(line){
-    line.style.display = matches(line.textContent, q) ? "" : "none";
+    var cb = line.querySelector("input[type=checkbox]");
+    var path = cb ? cb.value : line.textContent;   // match the path, not button labels
+    line.style.display = matches(path, q) ? "" : "none";
   });
 }
 function selectedRevPaths() {
