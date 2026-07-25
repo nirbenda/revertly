@@ -39,10 +39,21 @@ class SessionInfo:
     flagged: bool
     is_revert: bool
 
-    @property
-    def is_live(self) -> bool:
-        # unsealed session (crashed or currently running) — never auto-prune
-        return self.ended is None
+    # An unsealed session (ended is None) is either running NOW or a crash.
+    # We can't see the PID, so we use a grace window: unsealed AND started
+    # within LIVE_GRACE = "probably running, protect it"; unsealed but older =
+    # a zombie that can be reclaimed. A real agent run rarely exceeds a day.
+    def is_live(self, now: float) -> bool:
+        return self.ended is None and (now - self.started) < LIVE_GRACE
+
+    def age_ref(self) -> float:
+        # age is measured from when the RECORDING finished (ended), not when it
+        # started — a session that ran for 40 days and just ended is not "40
+        # days of old history". Falls back to started for unsealed sessions.
+        return self.ended if self.ended is not None else self.started
+
+
+LIVE_GRACE = 86400.0   # 24h: unsealed-and-recent = treated as live
 
 
 @dataclass
@@ -107,7 +118,7 @@ def plan(sessions: List[SessionInfo], *,
     sessions are always protected.
     """
     now = time.time() if now is None else now
-    prunable = [s for s in sessions if not s.is_live]
+    prunable = [s for s in sessions if not s.is_live(now)]
     if not include_flagged:
         prunable = [s for s in prunable if not s.flagged]
 
@@ -122,19 +133,24 @@ def plan(sessions: List[SessionInfo], *,
     if keep_days is not None:
         cutoff = now - keep_days * 86400
         for s in prunable:
-            if s.started < cutoff:
+            if s.age_ref() < cutoff:   # age from when the recording ENDED
                 mark(s, f"older than {keep_days:g}d")
     if before is not None:
         for s in prunable:
-            if s.started < before:
+            if s.started < before:     # timeline position -> started
                 mark(s, "before cutoff")
 
     if max_disk_bytes is not None:
-        total = sum(s.size for s in sessions)
-        # prune oldest non-flagged first until under cap
-        remaining = total - sum(p.size for p in chosen.values())
-        for s in sorted(prunable, key=lambda s: s.started):  # oldest first
-            if remaining <= max_disk_bytes:
+        # Disk cap can only reclaim PRUNABLE bytes. If the protected floor
+        # (live + kept-flagged) already exceeds the cap, chasing it would
+        # delete all history for nothing — so target max(cap, protected floor)
+        # and only remove what's actually over that.
+        protected_floor = sum(s.size for s in sessions
+                              if s.is_live(now) or (s.flagged and not include_flagged))
+        target = max(max_disk_bytes, protected_floor)
+        remaining = sum(s.size for s in sessions) - sum(p.size for p in chosen.values())
+        for s in sorted(prunable, key=lambda s: s.age_ref()):  # oldest first
+            if remaining <= target:
                 break
             if s.id not in chosen:
                 mark(s, "over disk cap")
@@ -146,7 +162,8 @@ def plan(sessions: List[SessionInfo], *,
 
 
 def apply(items: List[PruneItem], *, log: bool = True) -> int:
-    """Delete the planned sessions. Returns count removed. Incident-logged."""
+    """Delete the planned sessions. Returns the count ACTUALLY removed (a tree
+    that couldn't be fully deleted is not counted). Incident-logged."""
     removed = 0
     for it in items:
         if log:
@@ -154,17 +171,23 @@ def apply(items: List[PruneItem], *, log: bool = True) -> int:
             paths.append_incident(
                 "PRUNE", f"cleared session {it.id} [{it.reason}]{tag}")
         paths.rmtree_force(paths.session_dir(it.id))
-        removed += 1
+        if not os.path.isdir(paths.session_dir(it.id)):
+            removed += 1
+        elif log:
+            paths.append_incident("PRUNE-FAIL",
+                                  f"could not fully remove {it.id}")
     return removed
 
 
-def enforce_policy(cfg) -> int:
+def enforce_policy(cfg, exclude=None) -> int:
     """Automatic retention pass (run at seal): apply the config's day + disk
-    limits, non-flagged only, quietly. Returns count pruned."""
+    limits, non-flagged only, quietly. `exclude` protects a session id (the one
+    just sealed) from being pruned by its own seal. Returns count pruned."""
     keep_days = getattr(cfg, "retention_days", None)
     max_gb = getattr(cfg, "max_disk_gb", None)
     max_bytes = int(max_gb * 1e9) if max_gb else None
     if not keep_days and not max_bytes:
         return 0
-    items = plan(collect(), keep_days=keep_days, max_disk_bytes=max_bytes)
+    sessions = [s for s in collect() if s.id != exclude]
+    items = plan(sessions, keep_days=keep_days, max_disk_bytes=max_bytes)
     return apply(items)

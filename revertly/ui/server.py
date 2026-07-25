@@ -225,21 +225,25 @@ def locate_file(session_id: str, abs_path: str, which: str):
 
 def storage_summary():
     """Totals + per-session sizes for the Storage tab."""
+    import time
     from revertly import retention
     from revertly.config import load as load_config
     cfg = load_config(paths.config_path())
+    now = time.time()
     sessions = retention.collect()
     total = sum(s.size for s in sessions)
+    # ignore corrupt started==0 metas so "oldest" isn't reported as 1970
+    real_starts = [s.started for s in sessions if s.started > 0]
     return {
         "total_bytes": total,
         "session_count": len(sessions),
-        "oldest": min((s.started for s in sessions), default=None),
+        "oldest": min(real_starts) if real_starts else None,
         "cap_bytes": int(cfg.max_disk_gb * 1e9) if cfg.max_disk_gb else None,
         "retention_days": cfg.retention_days or None,
         "sessions": [
             {"id": s.id, "started": s.started, "ended": s.ended,
              "size": s.size, "flagged": s.flagged, "is_revert": s.is_revert,
-             "live": s.is_live}
+             "live": s.is_live(now)}
             for s in sessions
         ],
     }

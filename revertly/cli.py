@@ -206,15 +206,6 @@ def cmd_find(args) -> int:
     return 0
 
 
-def _session_size(sid) -> int:
-    total = 0
-    for root, _dirs, files in os.walk(paths.session_dir(sid)):
-        for fn in files:
-            try:
-                total += os.path.getsize(os.path.join(root, fn))
-            except OSError:
-                pass
-    return total
 
 
 def cmd_rm(args) -> int:
@@ -228,13 +219,23 @@ def cmd_rm(args) -> int:
     if missing:
         print(f"revertly rm: unknown session(s): {', '.join(missing)}")
         return 1
+    # never delete a session that is still running (mirrors the UI's guard):
+    # its watcher/journal are live, and the pre-image would vanish mid-run.
+    import time as _t
+    live = [s for s in args.sessions
+            if (_load_meta(s) or {}).get("ended") is None
+            and _t.time() - float((_load_meta(s) or {}).get("started") or 0) < 86400]
+    if live and not args.force:
+        print(f"revertly rm: refusing to delete session(s) that appear to be "
+              f"RUNNING ({', '.join(live)}) — wait for them to finish, or --force.")
+        return 1
     flagged = []
     total = 0
     for sid in args.sessions:
         m = _load_meta(sid) or {}
         trips = sum(1 for e in Journal.read(paths.journal_path(sid))
                     if e.kind in (EventKind.TRIPWIRE, EventKind.SELF_TAMPER))
-        size = _session_size(sid)
+        size = paths.session_size(sid)
         total += size
         tag = f"  ⚠ {trips} tripwire event(s)" if trips else ""
         print(f"  {sid}  ({m.get('name','?')})  {size/1e6:.1f} MB{tag}")
@@ -480,6 +481,8 @@ def cmd_gc(args) -> int:
     from . import retention
     cfg = load_config(paths.config_path())
     max_bytes = int(cfg.max_disk_gb * 1e9) if cfg.max_disk_gb else None
+    # honor the config's retention_days unless --keep overrides it
+    keep = args.keep if args.keep is not None else cfg.retention_days
     before = None
     if getattr(args, "before", None):
         before = _parse_before(args.before)
@@ -488,12 +491,12 @@ def cmd_gc(args) -> int:
                   f"(use a session id, 7d/12h, or YYYY-MM-DD)")
             return 2
     items = retention.plan(retention.collect(),
-                           keep_days=args.keep, max_disk_bytes=max_bytes,
+                           keep_days=keep, max_disk_bytes=max_bytes,
                            before=before)
     removed = retention.apply(items)
     freed = sum(i.size for i in items)
     print(f"revertly gc: removed {removed} session(s), freed {_human(freed)} "
-          f"(kept ≤{args.keep}d"
+          f"(kept ≤{keep}d"
           f"{f', ≤{cfg.max_disk_gb:g}GB' if max_bytes else ''}; "
           f"flagged/live kept)")
     return 0
@@ -828,7 +831,8 @@ def build_parser() -> argparse.ArgumentParser:
                    ).set_defaults(func=cmd_resume)
 
     gc = sub.add_parser("gc", help="enforce retention policy (age + disk cap)")
-    gc.add_argument("--keep", type=int, default=30, help="keep sessions ≤ N days")
+    gc.add_argument("--keep", type=int, default=None,
+                    help="keep sessions ≤ N days (default: config retention_days, 30)")
     gc.add_argument("--before", help="also prune before a session id / 7d / YYYY-MM-DD")
     gc.set_defaults(func=cmd_gc)
 

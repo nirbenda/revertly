@@ -297,12 +297,14 @@ class Session:
         paths.make_immutable(paths.meta_path(self.id))
         paths.make_immutable(paths.seal_path(self.id))
         # Automatic retention: enforce the config's day/disk limits now that a
-        # session just landed. Best-effort, never blocks or breaks sealing.
+        # session just landed. Exclude THIS session so a long run that just
+        # sealed can't be pruned by its own seal. Best-effort — a failure here
+        # is logged but never blocks or breaks sealing.
         try:
             from . import retention
-            retention.enforce_policy(self.cfg)
-        except Exception:
-            pass
+            retention.enforce_policy(self.cfg, exclude=self.id)
+        except Exception as exc:
+            paths.append_incident("RETENTION-FAIL", f"enforce at seal: {exc}")
         return self.meta
 
     def summary_line(self) -> str:
