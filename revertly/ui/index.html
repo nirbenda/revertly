@@ -82,6 +82,26 @@
   .hit.risky .k { color: var(--alert); }
   .ok-note { color: var(--ok); }
   .err-note { color: var(--alert); }
+
+  /* in-page modal (replaces native confirm/alert) */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; width: min(560px, 92vw); max-height: 86vh;
+    overflow: auto; box-shadow: 0 12px 48px rgba(0,0,0,.5); }
+  .modal.danger { border-color: rgba(255,92,92,.5); }
+  .modal h3 { margin: 0; padding: 14px 18px; font-size: 15px;
+    border-bottom: 1px solid var(--line); }
+  .modal.danger h3 { color: var(--alert); }
+  .modal .body { padding: 14px 18px; font-size: 13px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word; }
+  .modal .body .mono { font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px; color: var(--muted); }
+  .modal .type-field { width: 100%; margin-top: 10px; }
+  .modal .foot { display: flex; gap: 8px; justify-content: flex-end;
+    padding: 12px 18px; border-top: 1px solid var(--line); }
+  .modal .foot button { padding: 8px 16px; }
+  button.act:disabled { opacity: .4; cursor: not-allowed; border-color: var(--line); }
 </style>
 
 <header>
@@ -177,6 +197,57 @@ function fileURL(sid, path, which) {
   return "/api/session/" + encodeURIComponent(sid) + "/file?path=" + encodeURIComponent(path) + "&which=" + which;
 }
 
+// ---- in-page modals (replace native confirm/alert) ----
+// uiModal returns a Promise<boolean>: true = confirmed, false = cancelled.
+// opts: {title, body, confirmText, cancelText, danger, requireType}
+// requireType: confirm stays disabled until the user types this exact string.
+function uiModal(opts) {
+  return new Promise(function(resolve){
+    var overlay = el("div", "modal-overlay");
+    var box = el("div", "modal" + (opts.danger ? " danger" : ""));
+    box.appendChild(el("h3", null, opts.title || ""));
+    var body = el("div", "body");
+    (Array.isArray(opts.body) ? opts.body : [opts.body || ""]).forEach(function(part){
+      if (part == null) return;
+      if (part && part.mono) body.appendChild(el("div", "mono", part.mono));
+      else body.appendChild(el("div", null, String(part)));
+    });
+    var typeInput = null;
+    var foot = el("div", "foot");
+    var cancelBtn = null, okBtn = null;
+    function close(val){ if (overlay.parentNode) document.body.removeChild(overlay); document.removeEventListener("keydown", onKey); resolve(val); }
+    if (opts.requireType) {
+      body.appendChild(el("div", null, "Type " + JSON.stringify(opts.requireType) + " to confirm:"));
+      typeInput = document.createElement("input");
+      typeInput.type = "text"; typeInput.className = "type-field";
+      typeInput.addEventListener("input", function(){ okBtn.disabled = (typeInput.value !== opts.requireType); });
+      body.appendChild(typeInput);
+    }
+    box.appendChild(body);
+    if (opts.cancelText !== null) {
+      cancelBtn = el("button", "act", opts.cancelText || "Cancel");
+      cancelBtn.addEventListener("click", function(){ close(false); });
+      foot.appendChild(cancelBtn);
+    }
+    okBtn = el("button", "act " + (opts.danger ? "danger" : "primary"), opts.confirmText || "OK");
+    if (opts.requireType) okBtn.disabled = true;
+    okBtn.addEventListener("click", function(){ if (!okBtn.disabled) close(true); });
+    foot.appendChild(okBtn);
+    box.appendChild(foot);
+    overlay.appendChild(box);
+    overlay.addEventListener("click", function(e){ if (e.target === overlay) close(false); });
+    function onKey(e){ if (e.key === "Escape") close(false); else if (e.key === "Enter" && !okBtn.disabled) close(true); }
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    (typeInput || okBtn).focus();
+  });
+}
+function uiConfirm(opts){ return uiModal(opts); }
+function uiAlert(opts){
+  if (typeof opts === "string") opts = { title: opts };
+  return uiModal(Object.assign({ cancelText: null, confirmText: "OK" }, opts));
+}
+
 // ---- tabs ----
 var navButtons = document.querySelectorAll("nav button");
 navButtons.forEach(function(btn){
@@ -262,22 +333,37 @@ function refilterOpenEvents() {
   });
 }
 function deleteSession(s) {
-  var msg = "PERMANENTLY delete session " + s.id + (s.name ? " (" + s.name + ")" : "") +
-            "?\n\nIts journal, pre-images and revert points are gone forever — this is the one revertly action that cannot be undone.";
-  if (!window.confirm(msg)) return;
-  postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", {}).then(function(res){
-    if (res.status === 409) {
-      // server-side evidence guard (tripwire-flagged / still running)
-      if (!window.confirm("⚠ " + ((res.body && res.body.error) || "flagged session") +
-                          "\n\nDelete anyway?")) return;
-      postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", { force: true }).then(function(r2){
-        if (!r2.ok) { window.alert("delete failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
-        loadTimeline();
-      });
-      return;
-    }
-    if (!res.ok) { window.alert("delete failed: " + ((res.body && res.body.error) || res.status)); return; }
-    loadTimeline();
+  uiConfirm({
+    title: "Permanently delete session?",
+    danger: true,
+    confirmText: "Delete",
+    body: [
+      (s.name ? s.name + "  " : "") + s.id,
+      "Its journal, pre-images and revert points are gone forever — this is the one revertly action that cannot be undone."
+    ]
+  }).then(function(ok){
+    if (!ok) return;
+    postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", {}).then(function(res){
+      if (res.status === 409) {
+        // server-side evidence guard — require typing the id to force-delete
+        uiConfirm({
+          title: "This session may be evidence",
+          danger: true,
+          confirmText: "Force delete",
+          requireType: s.id,
+          body: [ "⚠ " + ((res.body && res.body.error) || "flagged session") ]
+        }).then(function(ok2){
+          if (!ok2) return;
+          postJSON("/api/session/" + encodeURIComponent(s.id) + "/delete", { force: true }).then(function(r2){
+            if (!r2.ok) { uiAlert("Delete failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
+            loadTimeline();
+          });
+        });
+        return;
+      }
+      if (!res.ok) { uiAlert("Delete failed: " + ((res.body && res.body.error) || res.status)); return; }
+      loadTimeline();
+    });
   });
 }
 function loadTimeline() { getJSON("/api/sessions").then(function(res){ tlRows = res.body || []; renderTimeline(); }); }
@@ -332,20 +418,27 @@ document.getElementById("find-go").addEventListener("click", runFind);
 document.getElementById("find-q").addEventListener("keydown", function(e){ if (e.key === "Enter") runFind(); });
 function restoreOne(sid, path) {
   postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: true }).then(function(res){
-    if (!res.ok) { window.alert("preview failed: " + ((res.body && res.body.error) || res.status)); return; }
+    if (!res.ok) { uiAlert("Preview failed: " + ((res.body && res.body.error) || res.status)); return; }
     var b = res.body;
     if (!(b.restores || []).length && !(b.deletes || []).length) {
-      window.alert("Nothing to revert for this path — it is already identical to its pre-image (or has no pre-image in this session).");
+      uiAlert("Nothing to revert — this path already matches its pre-image (or has none in this session).");
       return;
     }
-    if (!window.confirm("Revert this path from session " + sid + "?\n\n" + (b.summary || "") +
-                        "\n\nEquivalent CLI:\n" + (b.cli || "") +
-                        "\n\nNon-destructive: the revert is itself a session you can undo.")) return;
-    postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: false }).then(function(r2){
-      if (!r2.ok) { window.alert("revert failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
-      if (!r2.body.revert_id) { window.alert("Nothing was reverted — the plan was empty by the time it ran."); return; }
-      window.alert("Reverted.\nUndo with: revertly revert " + r2.body.revert_id);
-      loadTimeline();
+    uiConfirm({
+      title: "Revert this path?",
+      danger: true,
+      confirmText: "Revert",
+      body: [ "from session " + sid, b.summary || "",
+              { mono: "$ " + (b.cli || "") },
+              "Non-destructive: the revert is itself a session you can undo." ]
+    }).then(function(ok){
+      if (!ok) return;
+      postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: [path], dry_run: false }).then(function(r2){
+        if (!r2.ok) { uiAlert("Revert failed: " + ((r2.body && r2.body.error) || r2.status)); return; }
+        if (!r2.body.revert_id) { uiAlert("Nothing was reverted — the plan was empty by the time it ran."); return; }
+        uiAlert({ title: "Reverted ✓", body: [{ mono: "undo: revertly revert " + r2.body.revert_id }] });
+        loadTimeline();
+      });
     });
   });
 }
@@ -502,10 +595,15 @@ function revertPreview(cb) {
 document.getElementById("rev-preview").addEventListener("click", function(){ revertPreview(null); });
 document.getElementById("rev-execute").addEventListener("click", function(){
   revertPreview(function(sid, paths, plan){
-    var msg = "Execute this revert on session " + sid + "?\n\n" + (plan.summary || "") +
-              ((plan.conflicts || []).length ? "\n⚠ conflicts are SKIPPED (CLI --force to override)." : "") +
-              "\n\nNon-destructive: the revert is itself a session you can undo.";
-    if (!window.confirm(msg)) return;
+    uiConfirm({
+      title: "Execute this revert?",
+      danger: true,
+      confirmText: "Revert " + paths.length + " path" + (paths.length === 1 ? "" : "s"),
+      body: [ "session " + sid, plan.summary || "",
+              (plan.conflicts || []).length ? "⚠ conflicts are SKIPPED (use the CLI --force to override)." : null,
+              "Non-destructive: the revert is itself a session you can undo." ]
+    }).then(function(ok){
+    if (!ok) return;
     var summ = document.getElementById("rev-summary");
     postJSON("/api/session/" + encodeURIComponent(sid) + "/revert", { paths: paths, dry_run: false }).then(function(res){
       if (!res.ok) { summ.appendChild(el("div", "err-note", "revert failed: " + ((res.body && res.body.error) || res.status))); return; }
@@ -513,6 +611,7 @@ document.getElementById("rev-execute").addEventListener("click", function(){
       summ.appendChild(el("div", "ok-note", "Reverted ✓  (" + (res.body.summary || "") + ")"));
       summ.appendChild(el("div", "cli", "undo: revertly revert " + res.body.revert_id));
       loadTimeline();
+    });
     });
   });
 });
