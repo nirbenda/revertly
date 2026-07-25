@@ -156,15 +156,22 @@ On exit you get one summary line, and everything stays revertible.
 | Agent deleted the project (`rm -rf`, hallucinated cleanup) | `revertly revert` → "restore 1,204 deleted files from clone" → back in seconds |
 | Agent moved/renamed files (even a `A→B→C` chain) | Reverts are rename-aware: `revertly revert <session> A.txt` restores A and removes the moved copy — no stranded duplicate |
 | Injected agent wrote a LaunchAgent or edited `~/.zshrc` | A **tripwire fires** mid-session (notification + incident log) so you can stop it. In-project footprint reverts cleanly; **out-of-project files are alerted, not auto-reverted** — restore those from the APFS snapshot (see below) |
+| Injected agent tries to **read** `~/.ssh/id_rsa` or `.env` | With the **Claude Code hook** installed, the read fires a `READ` alert + incident the moment the agent's tool call runs — you can kill the session and rotate the key |
+| Agent runs `curl … \| bash`, sets a LaunchAgent, or `rm -rf ~/.revertly` | The hook flags it as `SUSPICIOUS` / `SELF_TAMPER` before it runs; every session ends with a security summary (`N sensitive reads, M suspicious commands`) |
 | You regret a revert | Reverts are sessions too: `revertly revert <revert-id>` — **nothing is ever lost** |
 
-> **Scope, stated plainly:** revert restores from the pre-image **clone of the
-> project directory**. Files *outside* the project (`~/.zshrc`, LaunchAgents,
-> `/etc`) are **watched and alerted** — you'll know the instant one is touched —
-> but not journaled with a pre-image, so revert can't roll their *contents*
-> back. That's the volume-level APFS snapshot's job (a manual Recovery
-> restore). Read-auditing (catching a *read* of `~/.ssh/id_rsa`) needs the
-> Endpoint Security backend and is **not** in Phase 1 — see `THREAT-MODEL.md`.
+> **Scope, stated plainly.** Two layers, two coverage areas:
+> - **Filesystem watcher** — catches every create/modify/delete/rename in the
+>   project (by *anything* — the agent, a shell command, or a script it spawns).
+>   Revert restores from the pre-image **clone of the project dir**; files
+>   *outside* it are alerted but not content-reverted (that's the APFS snapshot's
+>   job — a manual Recovery restore).
+> - **Hook layer** (`revertly hook`, installed with the `claude` binding) — sees
+>   the agent's **tool calls**, so it catches **reads** of secrets and
+>   **suspicious commands** that leave no file trace. Honest ceiling: it sees the
+>   agent's own tool calls; a **binary or subprocess** the agent spawns that
+>   reads a key or opens a socket is invisible until the Endpoint-Security build
+>   (Tier 3). It's **alert-only** in Phase 1 — it never blocks the agent.
 
 ## Commands
 
@@ -276,9 +283,11 @@ Endpoint Security build — see [`THREAT-MODEL.md`](THREAT-MODEL.md) §9 for the
 implemented-vs-roadmap matrix.
 
 **Known Phase-1 limits, by design:** the watcher *polls* (sub-second churn and
-mtime-preserving edits can slip; `/etc` isn't polled); **reads are not detected**
-(no read-tripwires — that needs the ES backend); the shim is an ergonomic
-default, not a security boundary; no blocking rules, telemetry, or admin — Phase 2.
+mtime-preserving edits can slip; `/etc` isn't polled). The hook layer sees the
+**agent's own tool calls** — a binary/subprocess the agent spawns that reads a
+secret or opens a network socket is invisible until the Endpoint-Security build.
+The hook is **alert-only** (blocking is Phase 2). The shim is an ergonomic
+default, not a security boundary; no telemetry or admin — Phase 2.
 
 ## Uninstall
 

@@ -217,6 +217,9 @@ def run_wrapped(cmd: List[str]) -> int:
         return _exec_unprotected(cmd, reason="internal error")
 
     print(f"revertly: armed session {sess.id} (snapshot+clone+watch active)", file=sys.stderr)
+    # Export the session dir so the agent's hooks (which run as its children and
+    # inherit the env) attribute READ/SUSPICIOUS findings to THIS session.
+    os.environ["REVERTLY_SESSION_DIR"] = paths.session_dir(sess.id)
     exit_code = 0
     try:
         exit_code = subprocess.call(cmd)

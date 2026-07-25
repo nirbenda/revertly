@@ -153,7 +153,9 @@ class Session:
         """
         roots = [self._resolve_scope()]
         for base in ("~/.ssh", "~/.aws", "~/.config/gh", "~/.gnupg",
-                     "~/Library/LaunchAgents", "~/Library/LaunchDaemons"):
+                     "~/Library/LaunchAgents", "~/Library/LaunchDaemons",
+                     "/Library/LaunchAgents", "/Library/LaunchDaemons",
+                     "/usr/lib/cron/tabs"):
             p = os.path.expanduser(base)
             if os.path.isdir(p) and p not in roots:
                 roots.append(p)
@@ -318,6 +320,15 @@ class Session:
             parts.append(f"{len(outside)} outside project ⚠")
         if trips:
             parts.append(f"{len(trips)} tripwire(s) ⚠")
+        # hook-layer findings (secret reads, suspicious commands)
+        from . import hooks
+        hf = hooks.read_session_findings(paths.session_dir(self.id))
+        reads = sum(1 for f in hf if f.get("kind") == "READ")
+        susp = sum(1 for f in hf if f.get("kind") in ("SUSPICIOUS", "SELF_TAMPER"))
+        if reads:
+            parts.append(f"{reads} sensitive read(s) ⚠")
+        if susp:
+            parts.append(f"{susp} suspicious command(s) ⚠")
         return (f"revertly: {', '.join(parts)} — 'revertly last' to inspect, "
                 f"'revertly revert {self.id}' to undo")
 

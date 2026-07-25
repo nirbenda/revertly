@@ -154,6 +154,13 @@ def _print_session(sid) -> int:
         for e in trips[:20]:
             tag = "SELF-TAMPER" if e.kind == EventKind.SELF_TAMPER else "tripwire"
             print(f"    {tag}: {e.op.value if e.op else '?'} {e.path}  ({e.detail})")
+    # hook-layer findings: secret reads / suspicious commands the agent made
+    from . import hooks
+    hf = hooks.read_session_findings(paths.session_dir(sid))
+    if hf:
+        print(f"  security (hook layer): {len(hf)} finding(s)")
+        for f in hf[:20]:
+            print(f"    {f.get('kind','?')}: {f.get('detail','')}")
     return 0
 
 
@@ -710,15 +717,7 @@ def cmd_install(args) -> int:
         print("\nNo known agent CLIs found on your PATH.")
         print("Bind one anytime with:  revertly bind <command>   (e.g. claude, codex, aider)")
 
-    bound = []
-    for cmd in want:
-        real = agents.real_on_path(cmd)
-        if not real:
-            print(f"  ⚠ '{cmd}' not found on PATH — skipping")
-            continue
-        p = shim.install_shim(cmd)
-        bound.append(cmd)
-        print(f"  bound {cmd:14} → {p}  (wraps {real})")
+    bound = [cmd for cmd in want if _bind_one(cmd)]
     if want and not bound:
         print("  (nothing bound)")
 
@@ -734,19 +733,28 @@ def cmd_install(args) -> int:
     return 0
 
 
+def _bind_one(cmd, print_=print):
+    """Install a shim for `cmd`; if it's claude, also wire the read/command
+    inspection hook into Claude Code. Returns True on success."""
+    from . import shim, agents, hooks
+    real = agents.real_on_path(cmd)
+    if not real:
+        print_(f"  ⚠ '{cmd}' not found on PATH — skipping")
+        return False
+    p = shim.install_shim(cmd)
+    print_(f"  bound {cmd:14} → {p}  (wraps {real})")
+    if cmd == "claude":
+        if hooks.install_claude_hook():
+            print_(f"    + installed Claude Code hook (detects secret reads & "
+                   f"suspicious commands) → {hooks.claude_settings_path()}")
+    return True
+
+
 def cmd_bind(args) -> int:
     """Bind revertly to one or more agent commands (install a shim for each)."""
-    from . import shim, agents
+    from . import shim
     shim.install_launcher()
-    ok = False
-    for cmd in args.agents:
-        real = agents.real_on_path(cmd)
-        if not real:
-            print(f"revertly bind: '{cmd}' not found on PATH — skipping")
-            continue
-        p = shim.install_shim(cmd)
-        print(f"bound {cmd} → {p}  (wraps {real})")
-        ok = True
+    ok = any([_bind_one(cmd) for cmd in args.agents])
     if ok:
         print("open a new terminal (or re-source your profile) to activate.")
     return 0 if ok else 1
@@ -754,15 +762,39 @@ def cmd_bind(args) -> int:
 
 def cmd_unbind(args) -> int:
     """Remove revertly's shim for one or more agent commands."""
-    from . import agents
+    from . import agents, hooks
     for cmd in args.agents:
         p = os.path.join(paths.bin_dir(), cmd)
         if os.path.isfile(p) and agents.is_revertly_shim(p):
             os.remove(p)
             print(f"unbound {cmd}")
+            if cmd == "claude" and hooks.uninstall_claude_hook():
+                print("  + removed the Claude Code hook")
         else:
             print(f"'{cmd}' was not bound")
     return 0
+
+
+def cmd_hook(args) -> int:
+    """Claude Code hook entrypoint (stdin) + hook management."""
+    from . import hooks
+    action = getattr(args, "action", None)
+    if action == "install":
+        ok = hooks.install_claude_hook()
+        print(f"Claude Code hook {'installed' if ok else 'could not be installed'} "
+              f"→ {hooks.claude_settings_path()}")
+        return 0 if ok else 1
+    if action == "uninstall":
+        ok = hooks.uninstall_claude_hook()
+        print("Claude Code hook " + ("removed" if ok else "was not present"))
+        return 0
+    if action == "status":
+        on = hooks.is_claude_hook_installed()
+        print(f"Claude Code hook: {'installed' if on else 'not installed'} "
+              f"({hooks.claude_settings_path()})")
+        return 0
+    # no action -> the hook itself: read the tool-call payload from stdin
+    return hooks.run_from_stdin()
 
 
 def cmd_agents(args) -> int:
@@ -791,6 +823,9 @@ def cmd_uninstall(args) -> int:
         resp = input(f"remove {what}{extra}? [y/N] ").strip().lower()
         if resp != "y":
             print("aborted."); return 1
+    from . import hooks
+    if hooks.uninstall_claude_hook():
+        print("removed the Claude Code hook")
     res = shim.uninstall(purge=args.purge)
     for p in res["removed"]:
         print(f"removed {p}")
@@ -1022,6 +1057,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("agents", help="list known agents: on PATH? bound?"
                    ).set_defaults(func=cmd_agents)
+
+    hk = sub.add_parser(
+        "hook", help="Claude Code hook: detect secret reads & suspicious commands",
+        description="With no argument, this is the hook entrypoint Claude Code "
+                    "calls (reads a tool-call payload on stdin, alert-only). "
+                    "Use install/uninstall/status to manage the ~/.claude hook.")
+    hk.add_argument("action", nargs="?",
+                    choices=["install", "uninstall", "status"],
+                    help="manage the Claude Code hook (default: run as the hook)")
+    hk.set_defaults(func=cmd_hook)
 
     un = sub.add_parser("uninstall",
                         help="remove all agent shims + launcher (add --purge to wipe history)")

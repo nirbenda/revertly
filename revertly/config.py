@@ -24,10 +24,15 @@ SELF_TAMPER_GLOBS = [
 # The .env FAMILY is covered, not just the bare name: `.env.local`,
 # `.env.production`, `secrets.env`, etc. are exactly where secrets hide.
 DEFAULT_TRIPWIRE_GLOBS = [
+    # credentials
     "~/.ssh/**", "~/.aws/**", "~/.config/gh/**", "~/.gnupg/**",
-    "~/Library/LaunchAgents/**", "~/Library/LaunchDaemons/**",
-    "/etc/**", "**/id_rsa*", "**/id_ed25519*", "**/*.pem",
+    "**/id_rsa*", "**/id_ed25519*", "**/id_ecdsa*", "**/*.pem",
     "**/.env", "**/.env.*", "**/*.env", "**/.npmrc", "**/.pypirc",
+    "**/.netrc", "**/.git-credentials", "**/authorized_keys",
+    # persistence (agent planting a RAT / auto-start)
+    "~/Library/LaunchAgents/**", "~/Library/LaunchDaemons/**",
+    "/Library/LaunchAgents/**", "/Library/LaunchDaemons/**",
+    "/usr/lib/cron/**", "/etc/cron*/**", "/etc/**",
 ]
 
 # Excluded from BOTH the watcher and the clone (see Session.arm clone prune).
