@@ -596,7 +596,16 @@ function showDiff(sid, path) {
   getJSON("/api/session/" + encodeURIComponent(sid) + "/diff?path=" + encodeURIComponent(path)).then(function(res){
     out.innerHTML = "";
     if (!res.ok) { out.textContent = (res.body && res.body.error) || "error"; return; }
-    var d = res.body.diff;
+    var b = res.body;
+    if (b.binary) {
+      var pb = b.pre_bytes == null ? "—" : human(b.pre_bytes);
+      var cb = b.cur_bytes == null ? "(absent)" : human(b.cur_bytes);
+      out.textContent = "Binary file — no text diff.\npre-image: " + pb +
+        "   ·   current: " + cb +
+        "\n\nUse the ⬇ pre / ⬇ cur buttons on the file row to inspect the bytes.";
+      return;
+    }
+    var d = b.diff;
     if (!d) { out.textContent = "(no textual differences — try 'view pre' / '⬇ pre' for the pre-image)"; return; }
     d.split("\n").forEach(function(line){
       var cls = "";
@@ -647,8 +656,15 @@ function viewPreimage(sid, path) {
     var boxm = el("div", "modal");
     boxm.appendChild(el("h3", null, "pre-image · " + path.split("/").pop()));
     var body = el("div", "body");
-    body.appendChild(el("div", "sub", path + (b.pre_binary ? "  (binary — download to inspect)" : "")));
-    var pre = el("pre", "file-view", (b.pre != null && b.pre !== "") ? b.pre : "(empty — the pre-image has no content)");
+    body.appendChild(el("div", "sub", path));
+    var content;
+    if (b.binary || b.pre_binary) {
+      content = "Binary file (" + (b.pre_bytes == null ? "—" : human(b.pre_bytes)) +
+                ") — can't be shown as text. Use “Download pre” to inspect the bytes.";
+    } else {
+      content = (b.pre != null && b.pre !== "") ? b.pre : "(empty — the pre-image has no content)";
+    }
+    var pre = el("pre", "file-view", content);
     body.appendChild(pre);
     boxm.appendChild(body);
     var foot = el("div", "foot");

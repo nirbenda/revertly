@@ -176,18 +176,30 @@ def build_diff(session_id: str, abs_path: str):
     pre, pre_bin = _read_text_best_effort(pre_path)
     cur, cur_bin = _read_text_best_effort(norm_abs)
 
-    diff = "".join(difflib.unified_diff(
+    # binary files have no meaningful text diff — signal it clearly and skip the
+    # difflib output (which would be replacement-char garbage).
+    is_binary = pre_bin or cur_bin
+    diff = "" if is_binary else "".join(difflib.unified_diff(
         pre.splitlines(keepends=True),
         cur.splitlines(keepends=True),
         fromfile="pre/" + os.path.basename(abs_path),
         tofile="cur/" + os.path.basename(abs_path),
     ))
+
+    def _size(p):
+        try:
+            return os.path.getsize(p)
+        except OSError:
+            return None
     return {
         "path": abs_path,
-        "pre": pre,
-        "cur": cur,
+        "pre": "" if is_binary else pre,
+        "cur": "" if is_binary else cur,
         "pre_binary": pre_bin,
         "cur_binary": cur_bin,
+        "binary": is_binary,
+        "pre_bytes": _size(pre_path) if pre_path else None,
+        "cur_bytes": _size(norm_abs),
         "diff": diff,
     }
 
