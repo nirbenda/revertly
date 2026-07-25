@@ -15,7 +15,7 @@ PYTHONPATH="$REPO" python3 -m revertly install "$@"
 
 echo
 echo "revertly: verifying…"
-PYTHONPATH="$REPO" python3 -m revertly doctor || true
+PYTHONPATH="$REPO" python3 -m revertly doctor --install || true
 echo
 echo "Next: open a NEW terminal (so PATH refreshes), then run:  revertly doctor"
 echo "Then just use \`claude\` as usual — revertly arms automatically."

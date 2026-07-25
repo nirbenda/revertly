@@ -57,9 +57,19 @@ class Session:
         try:
             if snapshotter.can_snapshot():
                 snap_name = snapshotter.create()
+            t0 = time.time()
             cloner.clone_tree(self.cwd, paths.clone_dir(self.id))
             self._prune_clone(paths.clone_dir(self.id))
             clone_ok = True
+            dt = time.time() - t0
+            if dt > 1.0:
+                # arming blocks the wrapped command's start; a slow clone means
+                # a big/non-CoW tree. Tell the user so it isn't a mystery hang,
+                # and hint at excludes.
+                import sys as _sys
+                print(f"revertly: clone took {dt:.1f}s — large project. Add big "
+                      f"regenerable dirs to [watch] exclude in "
+                      f"{paths.config_path()} to speed this up.", file=_sys.stderr)
         except Exception as exc:  # arming failed
             self._handle_arm_failure(exc)
             # if we get here, policy was 'proceed': continue unarmed

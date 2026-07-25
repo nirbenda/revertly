@@ -48,11 +48,32 @@ def _pause_flag() -> str:
     return os.path.join(paths.revertly_home(), "paused")
 
 
+def _shim_path_status():
+    """Is the claude shim installed AND first in PATH? Returns
+    (installed: bool, first: bool, resolves_to: str|None)."""
+    shim = os.path.join(paths.bin_dir(), "claude")
+    installed = os.path.exists(shim)
+    which = shutil.which("claude")
+    first = bool(which and installed
+                 and os.path.realpath(which) == os.path.realpath(shim))
+    return installed, first, which
+
+
 # ─────────────────────────── commands ───────────────────────────
 
 def cmd_status(args) -> int:
     paused = os.path.exists(_pause_flag())
-    print(f"revertly: {'PAUSED' if paused else 'armed (arms on next claude run)'}")
+    installed, first, which = _shim_path_status()
+    if paused:
+        state = "PAUSED — 'revertly resume' to re-arm"
+    elif not installed:
+        state = "NOT INSTALLED — run ./install.sh (claude runs unprotected)"
+    elif not first:
+        state = (f"⚠ BYPASSED — `claude` resolves to {which}, not the shim; "
+                 f"runs are UNPROTECTED (open a new terminal, or fix PATH)")
+    else:
+        state = "armed (shim is first in PATH; arms on next claude run)"
+    print(f"revertly: {state}")
     ids = paths.list_session_ids()
     print(f"sessions: {len(ids)}  store: {paths.revertly_home()}")
     for sid in ids[-5:][::-1]:
@@ -272,6 +293,58 @@ def cmd_versions(args) -> int:
     return 0
 
 
+def _newest_session_with_preimage(target: str):
+    """Newest session id holding a pre-image (clone blob) of `target`, or None."""
+    for sid in paths.list_session_ids()[::-1]:   # newest first
+        m = _load_meta(sid) or {}
+        cwd = m.get("cwd", "")
+        if not paths.is_under(target, cwd):
+            continue
+        blob = os.path.join(paths.clone_dir(sid), os.path.relpath(target, cwd))
+        if os.path.exists(blob):
+            return sid
+    return None
+
+
+def cmd_restore(args) -> int:
+    """The 90% ask: 'give me this file back' — no session id needed. Finds the
+    newest session holding a pre-image and reverts just this path."""
+    target = os.path.abspath(args.path)
+    sid = _newest_session_with_preimage(target)
+    if not sid:
+        print(f"revertly restore: no session holds a pre-image of {target} "
+              f"(outside every project dir, or GC'd). Try 'revertly find'.")
+        return 1
+    from .revert import Reverter
+    r = Reverter(paths.session_dir(sid))
+    ok, reason = r.is_revertible()
+    if not ok:
+        print(f"revertly: cannot restore from {sid}: {reason}")
+        return 1
+    plan = r.plan_paths([target])
+    if not plan.restores and not plan.deletes:
+        print(f"{target} already matches its pre-image in {sid} — nothing to do.")
+        return 0
+    print(f"restore {target} from session {sid}: {plan.summary()}")
+    for ch in plan.restores:
+        print(f"  restore {ch.path}")
+    for ch in plan.deletes:
+        print(f"  delete  {ch.path}")
+    for c in plan.conflicts:
+        print(f"  CONFLICT {c.path}: {c.reason}")
+    if args.dry_run:
+        print("(dry-run: nothing changed)")
+        return 0
+    if not args.yes and not _confirm("proceed? [y/N] "):
+        print("aborted."); return 1
+    rid = r.apply(plan, force=args.force)
+    if rid is None:
+        print("nothing restored (conflicts skipped — re-run with --force).")
+        return 1
+    print(f"restored. undo with: revertly revert {rid}")
+    return 0
+
+
 def cmd_revert(args) -> int:
     sid = _resolve_session(args.session)
     if not sid:
@@ -397,14 +470,21 @@ def cmd_verify(args) -> int:
 
 def cmd_doctor(args) -> int:
     ok = True
+    post_install = getattr(args, "install", False)
     # shim in PATH and ahead of the real claude?
-    which = shutil.which("claude")
+    installed, first, which = _shim_path_status()
     shim = os.path.join(paths.bin_dir(), "claude")
-    print(f"shim installed: {os.path.exists(shim)}  ({shim})")
+    print(f"shim installed: {installed}  ({shim})")
     print(f"`claude` resolves to: {which}")
-    if which and os.path.realpath(which) != os.path.realpath(shim) and os.path.exists(shim):
-        print("  ⚠ shim is NOT first in PATH — runs will bypass revertly")
-        ok = False
+    if installed and not first:
+        if post_install:
+            # right after install the profile PATH isn't sourced yet — this is
+            # expected, not a failure. Don't scare a fresh installer with WARN.
+            print("  ℹ shim not yet first in PATH — open a NEW terminal (or "
+                  "`source` your profile) to activate, then re-run doctor")
+        else:
+            print("  ⚠ shim is NOT first in PATH — runs will bypass revertly")
+            ok = False
     # snapshot capability
     from .snapshot import TmutilSnapshotter
     can = TmutilSnapshotter().can_snapshot()
@@ -450,6 +530,9 @@ def cmd_doctor(args) -> int:
             n = "?"
         print(f"  incidents logged: {n}  ({ilog})")
 
+    if post_install:
+        print("doctor:", "installed ✅ (open a new terminal to activate)")
+        return 0
     print("doctor:", "PASS ✅" if ok else "WARN ⚠")
     return 0 if ok else 1
 
@@ -534,6 +617,15 @@ def build_parser() -> argparse.ArgumentParser:
     rv.add_argument("--force", action="store_true")
     rv.set_defaults(func=cmd_revert)
 
+    rs = sub.add_parser("restore",
+                         help="restore one file/dir from its newest pre-image "
+                              "(no session id needed)")
+    rs.add_argument("path")
+    rs.add_argument("--yes", "-y", action="store_true")
+    rs.add_argument("--dry-run", action="store_true")
+    rs.add_argument("--force", action="store_true")
+    rs.set_defaults(func=cmd_restore)
+
     rm = sub.add_parser("rm",
                         help="PERMANENTLY delete sessions from the store")
     rm.add_argument("sessions", nargs="+")
@@ -557,7 +649,10 @@ def build_parser() -> argparse.ArgumentParser:
     vf.add_argument("--all", action="store_true", help="verify every session")
     vf.set_defaults(func=cmd_verify)
 
-    sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+    dr = sub.add_parser("doctor")
+    dr.add_argument("--install", action="store_true",
+                    help="post-install mode: don't WARN that PATH isn't sourced yet")
+    dr.set_defaults(func=cmd_doctor)
 
     ins = sub.add_parser("install")
     ins.add_argument("--no-profile", action="store_true",

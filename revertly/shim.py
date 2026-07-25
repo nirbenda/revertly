@@ -49,9 +49,17 @@ def install_shim(cmd_name: str = "claude") -> str:
     shim_path = os.path.join(paths.bin_dir(), cmd_name)
     script = f"""#!/bin/bash
 # revertly shim for `{cmd_name}` — arms the safety net, then runs the real thing.
-if [ -n "$REVERTLY_DISABLE" ]; then exec {real} "$@"; fi
+# Fail-safe: if revertly is unavailable (repo moved/deleted, python gone), run
+# the real command UNPROTECTED rather than break the user's `{cmd_name}`.
+REAL={real}
+if [ -n "$REVERTLY_DISABLE" ]; then exec "$REAL" "$@"; fi
 export PYTHONPATH="{_repo_root()}:$PYTHONPATH"
-exec {sys.executable} -m revertly shim -- {real} "$@"
+if {sys.executable} -c 'import revertly' 2>/dev/null; then
+  exec {sys.executable} -m revertly shim -- "$REAL" "$@"
+else
+  echo "revertly: engine unavailable (moved/removed?) — running {cmd_name} unprotected" >&2
+  exec "$REAL" "$@"
+fi
 """
     with open(shim_path, "w") as f:
         f.write(script)
