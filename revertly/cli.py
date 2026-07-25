@@ -4,7 +4,7 @@ Usage:
   claude …                      (via the shim — arms the net automatically)
   revertly status | last | log | find | diff | versions | revert | restore
         | rm | clear | ui | config | pause | resume | gc | verify | doctor
-        | install | shim
+        | install | bind | unbind | agents | uninstall | shim
 """
 from __future__ import annotations
 
@@ -58,31 +58,44 @@ def _pause_flag() -> str:
     return os.path.join(paths.revertly_home(), "paused")
 
 
-def _shim_path_status():
-    """Is the claude shim installed AND first in PATH? Returns
+def _shim_path_status(cmd="claude"):
+    """Is the shim for `cmd` installed AND first in PATH? Returns
     (installed: bool, first: bool, resolves_to: str|None)."""
-    shim = os.path.join(paths.bin_dir(), "claude")
+    shim = os.path.join(paths.bin_dir(), cmd)
     installed = os.path.exists(shim)
-    which = shutil.which("claude")
+    which = shutil.which(cmd)
     first = bool(which and installed
                  and os.path.realpath(which) == os.path.realpath(shim))
     return installed, first, which
+
+
+def _agents_status_line():
+    """One-line summary of bound agents and whether each is active (first in
+    PATH). Used by status and doctor."""
+    from . import agents
+    bound = agents.bound_agents()
+    if not bound:
+        return "no agents bound — run 'revertly install' or 'revertly bind <cmd>'", False
+    parts, all_ok = [], True
+    for cmd in bound:
+        _, first, _ = _shim_path_status(cmd)
+        parts.append(cmd if first else f"{cmd}⚠")
+        all_ok = all_ok and first
+    tail = "" if all_ok else "  (⚠ = shim not first in PATH; open a new terminal)"
+    return "bound: " + ", ".join(parts) + tail, all_ok
 
 
 # ─────────────────────────── commands ───────────────────────────
 
 def cmd_status(args) -> int:
     paused = os.path.exists(_pause_flag())
-    installed, first, which = _shim_path_status()
+    agents_line, agents_ok = _agents_status_line()
     if paused:
         state = "PAUSED — 'revertly resume' to re-arm"
-    elif not installed:
-        state = "NOT INSTALLED — run ./install.sh (claude runs unprotected)"
-    elif not first:
-        state = (f"⚠ BYPASSED — `claude` resolves to {which}, not the shim; "
-                 f"runs are UNPROTECTED (open a new terminal, or fix PATH)")
+    elif agents_ok:
+        state = f"armed · {agents_line}"
     else:
-        state = "armed (shim is first in PATH; arms on next claude run)"
+        state = agents_line
     print(f"revertly: {state}")
     ids = paths.list_session_ids()
     size = paths.store_size()
@@ -584,20 +597,22 @@ def cmd_verify(args) -> int:
 def cmd_doctor(args) -> int:
     ok = True
     post_install = getattr(args, "install", False)
-    # shim in PATH and ahead of the real claude?
-    installed, first, which = _shim_path_status()
-    shim = os.path.join(paths.bin_dir(), "claude")
-    print(f"shim installed: {installed}  ({shim})")
-    print(f"`claude` resolves to: {which}")
-    if installed and not first:
-        if post_install:
-            # right after install the profile PATH isn't sourced yet — this is
-            # expected, not a failure. Don't scare a fresh installer with WARN.
-            print("  ℹ shim not yet first in PATH — open a NEW terminal (or "
-                  "`source` your profile) to activate, then re-run doctor")
-        else:
-            print("  ⚠ shim is NOT first in PATH — runs will bypass revertly")
-            ok = False
+    # which agents are bound, and is each shim first in PATH?
+    from . import agents
+    bound = agents.bound_agents()
+    if not bound:
+        print("bound agents: none — run 'revertly install' or 'revertly bind <cmd>'")
+    else:
+        print(f"bound agents: {', '.join(bound)}")
+        for cmd in bound:
+            _, first, which = _shim_path_status(cmd)
+            if first:
+                print(f"  ✓ {cmd:14} shim first in PATH")
+            elif post_install:
+                print(f"  ℹ {cmd:14} not yet first in PATH — open a NEW terminal to activate")
+            else:
+                print(f"  ⚠ {cmd:14} shim NOT first in PATH ({cmd} → {which}) — bypassed")
+                ok = False
     # snapshot capability
     from .snapshot import TmutilSnapshotter
     can = TmutilSnapshotter().can_snapshot()
@@ -650,30 +665,130 @@ def cmd_doctor(args) -> int:
     return 0 if ok else 1
 
 
+def _choose_agents(detected):
+    """Interactive picker: which detected agents to bind. Returns list of cmds.
+    Non-interactive (no TTY) -> bind all detected."""
+    print("\nDetected coding agents on your PATH:")
+    for i, (cmd, name, rp) in enumerate(detected, 1):
+        print(f"  {i}. {cmd:14} {name}")
+    if not sys.stdin.isatty():
+        print("(non-interactive: binding all detected)")
+        return [c for c, _, _ in detected]
+    resp = input("\nBind revertly to which? [all / none / e.g. 1,3]  (default: all) ").strip().lower()
+    if resp in ("", "all", "a"):
+        return [c for c, _, _ in detected]
+    if resp in ("none", "n"):
+        return []
+    chosen = []
+    for tok in resp.replace(",", " ").split():
+        if tok.isdigit() and 1 <= int(tok) <= len(detected):
+            chosen.append(detected[int(tok) - 1][0])
+        else:
+            # allow typing a command name directly
+            for c, _, _ in detected:
+                if c == tok:
+                    chosen.append(c)
+    return chosen
+
+
 def cmd_install(args) -> int:
-    from . import shim
+    from . import shim, agents
     launcher = shim.install_launcher()
-    shim_path = shim.install_shim()
     print(f"installed launcher: {launcher}")
-    print(f"installed shim:     {shim_path}  (wraps the real `claude`)")
+
+    detected = agents.detect()
+    if args.agents:
+        want = [a.strip() for a in args.agents.replace(",", " ").split() if a.strip()]
+    elif args.all:
+        want = [c for c, _, _ in detected]
+    elif args.none:
+        want = []
+    elif detected:
+        want = _choose_agents(detected)
+    else:
+        want = []
+        print("\nNo known agent CLIs found on your PATH.")
+        print("Bind one anytime with:  revertly bind <command>   (e.g. claude, codex, aider)")
+
+    bound = []
+    for cmd in want:
+        real = agents.real_on_path(cmd)
+        if not real:
+            print(f"  ⚠ '{cmd}' not found on PATH — skipping")
+            continue
+        p = shim.install_shim(cmd)
+        bound.append(cmd)
+        print(f"  bound {cmd:14} → {p}  (wraps {real})")
+    if want and not bound:
+        print("  (nothing bound)")
+
     if args.no_profile:
         print(f"\nadd this to your shell profile to finish:\n"
               f'  export PATH="{paths.bin_dir()}:$PATH"')
     else:
         prof, changed = shim.add_path_to_profile()
-        if changed:
-            print(f"\nupdated PATH in {prof}")
-            print("open a new terminal (or `source` it), then: revertly doctor")
+        print(f"\n{'updated' if changed else 'PATH already configured in'} {prof}")
+    if bound:
+        print(f"\nOpen a NEW terminal, then use {', '.join(bound)} as usual — "
+              f"revertly arms automatically. Check with: revertly doctor")
+    return 0
+
+
+def cmd_bind(args) -> int:
+    """Bind revertly to one or more agent commands (install a shim for each)."""
+    from . import shim, agents
+    shim.install_launcher()
+    ok = False
+    for cmd in args.agents:
+        real = agents.real_on_path(cmd)
+        if not real:
+            print(f"revertly bind: '{cmd}' not found on PATH — skipping")
+            continue
+        p = shim.install_shim(cmd)
+        print(f"bound {cmd} → {p}  (wraps {real})")
+        ok = True
+    if ok:
+        print("open a new terminal (or re-source your profile) to activate.")
+    return 0 if ok else 1
+
+
+def cmd_unbind(args) -> int:
+    """Remove revertly's shim for one or more agent commands."""
+    from . import agents
+    for cmd in args.agents:
+        p = os.path.join(paths.bin_dir(), cmd)
+        if os.path.isfile(p) and agents.is_revertly_shim(p):
+            os.remove(p)
+            print(f"unbound {cmd}")
         else:
-            print(f"\nPATH already configured in {prof}")
+            print(f"'{cmd}' was not bound")
+    return 0
+
+
+def cmd_agents(args) -> int:
+    """List known agents: which are on PATH and which are bound to revertly."""
+    from . import agents
+    bound = set(agents.bound_agents())
+    detected = {c: rp for c, _, rp in agents.detect()}
+    print("agent          on PATH   bound   ")
+    for cmd, name in agents.KNOWN_AGENTS:
+        onp = "yes" if cmd in detected else "—"
+        b = "✓" if cmd in bound else " "
+        print(f"  {cmd:14} {onp:8} {b:6} {name}")
+    extra = [c for c in bound if c not in dict(agents.KNOWN_AGENTS)]
+    for cmd in extra:
+        print(f"  {cmd:14} {'?':8} {'✓':6} (custom)")
+    print("\nbind/unbind:  revertly bind <cmd>   ·   revertly unbind <cmd>")
     return 0
 
 
 def cmd_uninstall(args) -> int:
-    from . import shim
+    from . import shim, agents
+    bound = agents.bound_agents()
     if not args.yes:
+        what = f"{len(bound)} agent shim(s) ({', '.join(bound) or 'none'}) + launcher"
         extra = " and DELETE the whole session store (~/.revertly)" if args.purge else ""
-        resp = input(f"remove revertly shim + launcher{extra}? [y/N] ").strip().lower()
+        resp = input(f"remove {what}{extra}? [y/N] ").strip().lower()
         if resp != "y":
             print("aborted."); return 1
     res = shim.uninstall(purge=args.purge)
@@ -686,7 +801,7 @@ def cmd_uninstall(args) -> int:
         print("purged session store (~/.revertly)")
     elif not args.purge:
         print("session store kept (use --purge to delete it, or: rm -rf ~/.revertly)")
-    print("done. `claude` now runs normally again.")
+    print("done. your agent commands now run normally again.")
     return 0
 
 
@@ -727,7 +842,8 @@ common workflows
     revertly clear --before <id>     clear history before a safe point
     revertly gc                      apply the retention policy (age + cap)
   set up & check health
-    revertly install                 add the `claude` shim to your PATH
+    revertly install                 detect agent CLIs and bind revertly to them
+    revertly agents                  which agents are on PATH / bound
     revertly doctor                  is the net armed and healthy?
     revertly ui                      open the visual control panel
 
@@ -879,14 +995,36 @@ def build_parser() -> argparse.ArgumentParser:
                     help="post-install mode: don't WARN that PATH isn't sourced yet")
     dr.set_defaults(func=cmd_doctor)
 
-    ins = sub.add_parser("install",
-                        help="install the `claude` shim + launcher into PATH")
+    ins = sub.add_parser(
+        "install", help="detect agent CLIs and bind revertly to them",
+        description="Install the launcher and shim(s) into ~/.revertly/bin and add "
+                    "it to PATH. Detects known agent CLIs (Claude Code, Codex, "
+                    "Gemini, Aider, Cursor CLI, …) and offers to bind them.",
+        epilog="examples:\n"
+               "  revertly install                 # detect + interactively choose\n"
+               "  revertly install --all           # bind every detected agent\n"
+               "  revertly install --agents claude,aider\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ins.add_argument("--agents", help="comma/space list of commands to bind")
+    ins.add_argument("--all", action="store_true", help="bind all detected agents")
+    ins.add_argument("--none", action="store_true", help="launcher only, bind nothing")
     ins.add_argument("--no-profile", action="store_true",
                      help="don't touch the shell profile; just print the PATH line")
     ins.set_defaults(func=cmd_install)
 
+    bd = sub.add_parser("bind", help="bind revertly to an agent command (add a shim)")
+    bd.add_argument("agents", nargs="+", metavar="command")
+    bd.set_defaults(func=cmd_bind)
+
+    ub = sub.add_parser("unbind", help="remove revertly's shim for an agent command")
+    ub.add_argument("agents", nargs="+", metavar="command")
+    ub.set_defaults(func=cmd_unbind)
+
+    sub.add_parser("agents", help="list known agents: on PATH? bound?"
+                   ).set_defaults(func=cmd_agents)
+
     un = sub.add_parser("uninstall",
-                        help="remove the shim + launcher (add --purge to wipe history)")
+                        help="remove all agent shims + launcher (add --purge to wipe history)")
     un.add_argument("--purge", action="store_true",
                     help="also delete the session store (~/.revertly and all history)")
     un.add_argument("--yes", "-y", action="store_true")

@@ -84,14 +84,26 @@ Stock macOS is all you need — APFS and `python3` are already there.
 
 ```sh
 git clone <this-repo> revertly && cd revertly
-./install.sh
+./install.sh           # detects your agent CLIs and asks which to bind
 revertly doctor        # new terminal first — confirms shim order, snapshots, store health
 ```
 
-`install.sh` puts a `revertly` launcher and a `claude` shim in `~/.revertly/bin`
-and adds one clearly-marked, reversible block to your shell profile
-(`--no-profile` to skip that and add the PATH line yourself). From then on,
-`claude` works exactly as before — the net arms itself on every run.
+`install.sh` puts a `revertly` launcher in `~/.revertly/bin`, **detects the
+agent CLIs on your PATH** (Claude Code, Codex, Gemini, Aider, Cursor CLI, …) and
+lets you pick which to bind, then adds the bin dir to your shell profile in one
+clearly-marked, reversible block (`--no-profile` to add the PATH line yourself;
+`--all` / `--agents claude,aider` to skip the prompt). From then on, each bound
+agent works exactly as before — the net arms itself on every run.
+
+```sh
+revertly agents                 # which agents are on PATH, and which are bound
+revertly bind codex             # bind another one anytime
+revertly unbind aider           # or remove one
+```
+
+**Works with any CLI agent** — the recorder wraps *any* command, so binding is
+just a shim per command name. GUI/IDE agents (Cursor app, Copilot in VS Code)
+aren't shimmable (no command to wrap); an ambient watch mode for those is planned.
 
 ## The 60-second tour
 

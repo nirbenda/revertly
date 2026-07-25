@@ -146,10 +146,14 @@ def remove_path_from_profile(profile: str = None) -> tuple:
 
 
 def uninstall(purge: bool = False, profile: bool = True) -> dict:
-    """Remove shim + launcher (+ optionally PATH line and the whole store)."""
+    """Remove ALL agent shims + the launcher (+ optionally PATH line and the
+    whole store). Handles however many agents were bound, not just claude."""
+    from . import agents
     result = {"removed": [], "profile": None, "purged": False}
-    for name in ("claude", "revertly"):
-        p = os.path.join(paths.bin_dir(), name)
+    bd = paths.bin_dir()
+    names = list(agents.bound_agents()) + ["revertly"]
+    for name in names:
+        p = os.path.join(bd, name)
         if os.path.exists(p):
             os.remove(p)
             result["removed"].append(p)

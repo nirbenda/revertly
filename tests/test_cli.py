@@ -146,14 +146,14 @@ class TestClear(_Fixture):
 
 
 class TestStatusHonesty(_Fixture):
-    def test_status_reports_not_installed(self):
+    def test_status_reports_no_agents_bound(self):
         args = cli.build_parser().parse_args(["status"])
         buf = io.StringIO()
         with redirect_stdout(buf):
             args.func(args)
         # no shim in this temp store's bin -> must not claim "armed"
-        self.assertNotIn("armed (shim is first", buf.getvalue())
-        self.assertIn("NOT INSTALLED", buf.getvalue())
+        self.assertNotIn("armed", buf.getvalue())
+        self.assertIn("no agents bound", buf.getvalue())
 
 
 class TestDoctorInstallMode(_Fixture):

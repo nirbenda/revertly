@@ -1,7 +1,8 @@
 #!/bin/bash
-# revertly installer. Usage: ./install.sh [--no-profile]
-# Installs a `revertly` launcher and a `claude` shim into ~/.revertly/bin and adds
-# that dir to your PATH (unless --no-profile). Fully reversible: ./uninstall.sh
+# revertly installer. Usage: ./install.sh [--all] [--agents claude,aider] [--none] [--no-profile]
+# Installs a `revertly` launcher into ~/.revertly/bin, DETECTS the agent CLIs on
+# your PATH (Claude Code, Codex, Gemini, Aider, Cursor CLI, …) and offers to bind
+# them, then adds the bin dir to PATH (unless --no-profile). Reversible: ./uninstall.sh
 set -e
 REPO="$(cd "$(dirname "$0")" && pwd)"
 
@@ -18,4 +19,5 @@ echo "revertly: verifying…"
 PYTHONPATH="$REPO" python3 -m revertly doctor --install || true
 echo
 echo "Next: open a NEW terminal (so PATH refreshes), then run:  revertly doctor"
-echo "Then just use \`claude\` as usual — revertly arms automatically."
+echo "Then use your bound agent(s) as usual — revertly arms automatically."
+echo "Bind more later with:  revertly bind <command>   ·   see all:  revertly agents"
