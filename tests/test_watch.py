@@ -141,6 +141,29 @@ class TestPollingWatcher(unittest.TestCase):
         if thread is not None:
             self.assertFalse(thread.is_alive())
 
+    def test_stop_emits_changes_since_last_poll(self):
+        # Regression: a session shorter than one poll interval must still
+        # journal its changes — stop() performs a final catch-up sweep.
+        pre = os.path.join(self.root, "pre.txt")
+        with open(pre, "w") as f:
+            f.write("existed before start")
+        self.watcher = PollingWatcher(interval=30.0)  # poll will never fire
+        self.watcher.start(self.root, self.collector)
+
+        os.remove(pre)
+        created = os.path.join(self.root, "made.txt")
+        with open(created, "w") as f:
+            f.write("born and never polled")
+        self.watcher.stop()
+
+        events = self.collector.snapshot()
+        self.assertTrue(
+            any(e.path == pre and e.op == FsOp.DELETE for e in events),
+            "stop() must emit the un-polled DELETE")
+        self.assertTrue(
+            any(e.path == created and e.op == FsOp.CREATE for e in events),
+            "stop() must emit the un-polled CREATE")
+
     def test_events_carry_timestamp(self):
         self._start()
         p = os.path.join(self.root, "t.txt")

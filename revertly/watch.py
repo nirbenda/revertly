@@ -85,6 +85,13 @@ class PollingWatcher(Watcher):
         if thread is not None:
             thread.join(timeout=max(self.interval * 4, 2.0))
         self._thread = None
+        # Final catch-up sweep: a session shorter than one poll interval (or
+        # changes landing between the last poll and stop) must still be
+        # journaled — the session seals the journal right after stopping us.
+        try:
+            self._diff_and_emit()
+        except OSError:
+            pass
 
     # ---- internals ----
 
