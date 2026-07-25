@@ -65,6 +65,8 @@
   button.danger:hover { border-color: var(--alert); }
   button.mini { padding: 2px 8px; font-size: 11px; border-radius: 5px; }
   .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field > span { font-size: 11px; color: var(--muted); padding-left: 2px; }
   pre.diff { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
   pre.diff .add { color: var(--ok); }
   pre.diff .del { color: var(--alert); }
@@ -179,26 +181,29 @@
   </section>
 
   <section id="tab-diff" class="tab">
+    <div class="sub" style="margin-bottom:10px">Compare any file a session changed — its pre-image (before the session) against the current version on disk.</div>
     <div class="toolbar">
-      <select id="diff-session"></select>
-      <select id="diff-path"></select>
+      <label class="field"><span>Session</span><select id="diff-session"></select></label>
+      <label class="field"><span>File</span><select id="diff-path"></select></label>
       <button class="act primary" id="diff-go">Show diff</button>
-      <button class="act" id="diff-view-pre">View pre</button>
-      <button class="act" id="diff-view-cur">View cur</button>
-      <button class="act" id="diff-dl-pre">Download pre</button>
-      <button class="act" id="diff-dl-cur">Download cur</button>
+      <span class="sub" style="margin:0 4px">inspect:</span>
+      <button class="act mini" id="diff-view-pre">view pre</button>
+      <button class="act mini" id="diff-view-cur">view current</button>
+      <button class="act mini" id="diff-dl-pre">⬇ pre</button>
+      <button class="act mini" id="diff-dl-cur">⬇ current</button>
     </div>
-    <pre class="diff" id="diff-out">Pick a session and a changed path.</pre>
+    <pre class="diff" id="diff-out">Pick a session, then a file it changed.</pre>
   </section>
 
   <section id="tab-revert" class="tab">
+    <div class="sub" style="margin-bottom:10px">Undo a session's changes — tick the files to restore (each row can be viewed/downloaded first), preview, then revert. Non-destructive: the revert is itself a session you can undo.</div>
     <div class="toolbar">
-      <select id="rev-session"></select>
-      <input type="text" id="rev-filter" placeholder="filter paths…">
-      <button class="act mini" id="rev-all">all</button>
-      <button class="act mini" id="rev-none">none</button>
-      <button class="act primary" id="rev-preview">Preview (dry-run)</button>
-      <button class="act danger" id="rev-execute">Revert selected…</button>
+      <label class="field"><span>Session</span><select id="rev-session"></select></label>
+      <input type="text" id="rev-filter" placeholder="filter paths…" style="align-self:flex-end">
+      <button class="act mini" id="rev-all" style="align-self:flex-end">all</button>
+      <button class="act mini" id="rev-none" style="align-self:flex-end">none</button>
+      <button class="act primary" id="rev-preview" style="align-self:flex-end">Preview (dry-run)</button>
+      <button class="act danger" id="rev-execute" style="align-self:flex-end">Revert selected…</button>
     </div>
     <div class="card" id="rev-paths"></div>
     <div class="summary" id="rev-summary" style="display:none"></div>
@@ -520,22 +525,47 @@ function populateSessionPickers(done) {
     loadDiffPaths(); loadRevertPaths();
   });
 }
+// The set of files a session actually CHANGED = its pre-image (clone) vs the
+// current files, i.e. the dry-run revert plan. This is the honest source and,
+// unlike the journal's fs events, it works for REVERT sessions too (whose own
+// changes were never watched). Falls back to journal events if the plan is
+// unavailable.
 function changedPathsFor(sessionId, cb) {
-  getJSON("/api/session/" + encodeURIComponent(sessionId)).then(function(res){
-    var seen = {}, out = [];
-    ((res.body && res.body.events) || []).forEach(function(ev){
-      if (ev.kind === "fs" && ev.path && !seen[ev.path]) { seen[ev.path] = 1; out.push(ev.path); }
+  postJSON("/api/session/" + encodeURIComponent(sessionId) + "/revert",
+           { all: true, dry_run: true }).then(function(res){
+    var out = [], seen = {};
+    if (res.ok && res.body) {
+      (res.body.restores || []).concat(res.body.deletes || []).forEach(function(c){
+        if (c.path && !seen[c.path]) { seen[c.path] = 1; out.push(c.path); }
+      });
+    }
+    if (out.length) { cb(out); return; }
+    // fallback: journal fs events (empty plan, or an unrevertible session)
+    getJSON("/api/session/" + encodeURIComponent(sessionId)).then(function(r2){
+      var o2 = [], s2 = {};
+      ((r2.body && r2.body.events) || []).forEach(function(ev){
+        if (ev.kind === "fs" && ev.path && !s2[ev.path]) { s2[ev.path] = 1; o2.push(ev.path); }
+      });
+      cb(o2);
     });
-    cb(out);
   });
 }
 
 // ---- Diff ----
 function loadDiffPaths(done) {
   var sel = document.getElementById("diff-session"); if (!sel.value) return;
+  var ps = document.getElementById("diff-path");
+  ps.innerHTML = ""; ps.appendChild(el("option", null, "loading…"));
   changedPathsFor(sel.value, function(paths){
-    var ps = document.getElementById("diff-path"); ps.innerHTML = "";
-    paths.forEach(function(p){ var o = el("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
+    ps.innerHTML = "";
+    if (!paths.length) {
+      var o = el("option"); o.value = ""; o.textContent = "— no changed files in this session —"; o.disabled = true;
+      ps.appendChild(o);
+      document.getElementById("diff-out").textContent =
+        "This session has no file changes to compare (nothing differs from its pre-image).";
+    } else {
+      paths.forEach(function(p){ var o = el("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
+    }
     if (done) done();
   });
 }
