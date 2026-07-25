@@ -141,20 +141,49 @@ class PollingWatcher(Watcher):
         current = self._scan()
         prev = self._prev
 
+        created = [p for p in current if p not in prev]
+        deleted = [p for p in prev if p not in current]
+        renames = self._pair_renames(created, deleted, prev, current)
+
+        for new_path, old_path in renames.items():
+            self._emit(FsOp.RENAME, new_path, path_from=old_path)
+        for path in created:
+            if path not in renames:
+                self._emit(FsOp.CREATE, path)
         for path, meta in current.items():
             old = prev.get(path)
-            if old is None:
-                self._emit(FsOp.CREATE, path)
-            elif old != meta:
+            if old is not None and old != meta:
                 self._emit(FsOp.WRITE, path)
-
-        for path in prev:
-            if path not in current:
+        renamed_from = set(renames.values())
+        for path in deleted:
+            if path not in renamed_from:
                 self._emit(FsOp.DELETE, path)
 
         self._prev = current
 
-    def _emit(self, op: FsOp, path: str) -> None:
+    @staticmethod
+    def _pair_renames(created, deleted, prev: Snapshot,
+                      current: Snapshot) -> Dict[str, str]:
+        """Infer renames: a move keeps the inode, so (mtime, size) survive
+        exactly. Pair a created path with a deleted one ONLY when the
+        signature match is one-to-one — ambiguity falls back to
+        create+delete, never a guessed rename. Returns {new: old}.
+        """
+        del_by_sig: Dict[Tuple[float, int], list] = {}
+        for p in deleted:
+            del_by_sig.setdefault(prev[p], []).append(p)
+        cre_by_sig: Dict[Tuple[float, int], list] = {}
+        for p in created:
+            cre_by_sig.setdefault(current[p], []).append(p)
+        renames: Dict[str, str] = {}
+        for sig, news in cre_by_sig.items():
+            olds = del_by_sig.get(sig, [])
+            if len(news) == 1 and len(olds) == 1:
+                renames[news[0]] = olds[0]
+        return renames
+
+    def _emit(self, op: FsOp, path: str, path_from: Optional[str] = None) -> None:
         if self._on_event is None:
             return
-        self._on_event(Event(kind=EventKind.FS, op=op, path=path, t=time.time()))
+        self._on_event(Event(kind=EventKind.FS, op=op, path=path,
+                             path_from=path_from, t=time.time()))

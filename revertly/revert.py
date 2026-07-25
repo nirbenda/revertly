@@ -41,6 +41,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from typing import List, Optional
 
 from revertly import paths
@@ -74,6 +75,30 @@ def _same_content(a: str, b: str) -> bool:
     except OSError:
         return False
     return _digest(a) == _digest(b)
+
+
+def _rename_pairs(journal_path: str, since: float = 0.0) -> List[tuple]:
+    """(old, new) pairs from a journal's rename events, tolerant reader."""
+    pairs: List[tuple] = []
+    if not os.path.isfile(journal_path):
+        return pairs
+    try:
+        with open(journal_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if (ev.get("kind") == "fs" and ev.get("op") == "rename"
+                        and ev.get("path") and ev.get("path_from")
+                        and (ev.get("t") or 0.0) >= since):
+                    pairs.append((ev["path_from"], ev["path"]))
+    except OSError:
+        pass
+    return pairs
 
 
 def _walk_rel(root: str) -> List[str]:
@@ -120,13 +145,18 @@ class Reverter:
         so `*.py` selects every .py the session touched at any depth — while
         a literal path that merely contains brackets (Next.js `app/[slug]/`)
         still matches exactly via its prefix.
+
+        Rename-aware: if the selected path was moved (this session or a later
+        one — journals record `rename` events), every path in its rename
+        chain is selected too, so reverting `A` after `A→B→C` restores A AND
+        removes C instead of stranding a duplicate.
         """
         from revertly.search import is_glob, path_matches
 
         prefixes = [self._normalize(p) for p in paths_arg]
         globs = [p for p in paths_arg if is_glob(p)]
 
-        def keep(abs_path: str) -> bool:
+        def base(abs_path: str) -> bool:
             for pre in prefixes:
                 if abs_path == pre or abs_path.startswith(pre + os.sep):
                     return True
@@ -135,7 +165,48 @@ class Reverter:
                     return True
             return False
 
+        aliases = self._rename_aliases()
+
+        def keep(abs_path: str) -> bool:
+            if base(abs_path):
+                return True
+            return any(base(a) for a in aliases.get(abs_path, ()))
+
         return self._build_plan(path_filter=keep)
+
+    # ── rename chains ──────────────────────────────────────────────────
+    def _rename_aliases(self) -> dict:
+        """Map each path to the set of paths it is connected to through
+        `rename` journal events — from this session's journal plus any later
+        session in the same store (a later move extends the chain).
+        Returns {path: {other paths in its chain}}.
+        """
+        started = self.meta.started or 0.0
+        pairs = _rename_pairs(
+            os.path.join(self.session_dir, "journal.jsonl"), since=started)
+        store = os.path.dirname(self.session_dir.rstrip(os.sep))
+        if os.path.abspath(store) == os.path.abspath(paths.sessions_root()):
+            for sid in paths.list_session_ids():
+                sdir = os.path.abspath(paths.session_dir(sid))
+                if sdir == self.session_dir:
+                    continue
+                pairs += _rename_pairs(paths.journal_path(sid), since=started)
+        # union-find the chains
+        parent: dict = {}
+
+        def find(x):
+            parent.setdefault(x, x)
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for old, new in pairs:
+            parent[find(old)] = find(new)
+        groups: dict = {}
+        for p in parent:
+            groups.setdefault(find(p), set()).add(p)
+        return {p: grp - {p} for grp in groups.values() for p in grp}
 
     def _normalize(self, p: str) -> str:
         if not os.path.isabs(p):
@@ -186,11 +257,16 @@ class Reverter:
         return plan
 
     def _diverged(self, abs_path: str) -> bool:
-        """True if abs_path's current mtime is strictly after meta.ended."""
+        """True if abs_path changed after meta.ended — by content (mtime) OR
+        by location/metadata (ctime). The ctime check matters for moves:
+        `mv` preserves mtime, so a file moved here by a LATER session would
+        otherwise be silently deleted by this revert with no conflict flag.
+        """
         try:
-            return os.path.getmtime(abs_path) > self.ended
+            st = os.stat(abs_path)
         except OSError:
             return False
+        return max(st.st_mtime, st.st_ctime) > self.ended
 
     # ── applying ───────────────────────────────────────────────────────
     def apply(self, plan: RevertPlan, *, dry_run: bool = False,
@@ -233,13 +309,41 @@ class Reverter:
         # 2. capture current state of every affected path into revert-session.
         self._capture(revert_id, restores, deletes)
 
-        # 3. mutate.
-        for change in restores:
-            self._restore(change)
+        # 3. mutate — DELETES FIRST. A created file can occupy a path (or
+        # block a parent) that a restore needs: session did `rm -rf dir` then
+        # wrote a FILE named `dir` -> restoring dir/x before deleting the
+        # file crashes; likewise a created dir sitting where a file must be
+        # restored. Clearing created paths first makes restores land on
+        # clean ground. Individual failures are collected, never abort the
+        # rest of the plan.
         for change in deletes:
-            self._delete(change)
+            try:
+                self._delete(change)
+            except OSError as exc:
+                plan.errors.append("delete %s: %s" % (change.path, exc))
+        for change in restores:
+            try:
+                self._restore(change)
+            except OSError as exc:
+                plan.errors.append("restore %s: %s" % (change.path, exc))
+
+        # 4. the revert-session's `ended` must be later than every mutation
+        # above (ctime-aware conflict detection compares against it), so
+        # stamp it NOW — not at capture time.
+        self._stamp_ended(revert_id)
 
         return revert_id
+
+    def _stamp_ended(self, revert_id: str) -> None:
+        mp = paths.meta_path(revert_id)
+        try:
+            with open(mp) as f:
+                meta = json.load(f)
+            meta["ended"] = time.time()
+            with open(mp, "w") as f:
+                json.dump(meta, f)
+        except (OSError, ValueError):
+            pass
 
     def _capture(self, revert_id: str, restores: List[Change],
                  deletes: List[Change]) -> None:
@@ -288,6 +392,11 @@ class Reverter:
         """Restore MODIFIED/DELETED target from its pre-image bytes."""
         assert change.pre_blob is not None
         dst = change.path
+        if os.path.isdir(dst):
+            # copy2 into a directory would silently write dst/<basename>
+            # instead of failing — surface it as the error it is.
+            raise IsADirectoryError(
+                "restore target is (now) a directory: %s" % dst)
         os.makedirs(os.path.dirname(dst) or self.cwd, exist_ok=True)
         shutil.copy2(change.pre_blob, dst)
 

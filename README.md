@@ -125,11 +125,15 @@ revertly install [--no-profile] | uninstall [--purge]
 ```
 
 Reverts are **preview-first** (plan printed, confirmation required),
-**conflict-aware** (files you changed *after* the session are flagged, shown as
-a 3-way decision, never silently clobbered), and **non-destructive** (every
-revert is itself a session — you can always undo the undo). Revert paths
-accept **globs**: `revertly revert <session> '*.py'` restores every Python
-file the session touched.
+**conflict-aware** (files changed *after* the session — by edit **or by a
+later move**, which ctime betrays even though `mv` preserves mtime — are
+flagged, never silently clobbered), and **non-destructive** (every revert is
+itself a session — you can always undo the undo). Revert paths accept
+**globs** (`'*.py'`), and reverts are **rename-aware**: moves are journaled
+as `rename old → new`, and reverting a path follows its whole rename chain —
+even across sessions — so `A → B → C` collapses to "restore A, remove C"
+instead of stranding duplicates. Apply order is deletes-first, so
+file↔directory swaps revert cleanly.
 
 The `revertly ui` control panel can do all of it visually: filter sessions and
 events, **search every session** for a path (Find tab), view or download any

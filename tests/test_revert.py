@@ -35,8 +35,10 @@ class _Fixture:
         self.sid = "2026-07-25T10-00-00_test"
         self._clone = paths.clone_dir(self.sid)
         paths.ensure_dir(self._clone)
-        # session ended 1 hour ago by default
-        self.ended = time.time() - 3600.0
+        # stamped for real in finalize() — divergence is now ctime-aware, so
+        # the fixture builds files first and seals the session AFTER, exactly
+        # like a real session does.
+        self.ended = None
         self._meta_written = False
 
     # -- building the pre-image (clone) + matching cwd seed --------------
@@ -73,13 +75,12 @@ class _Fixture:
         os.utime(p, (when, when))
 
     def finalize(self):
-        """Write meta.json. All clone files get mtime <= ended so nothing is
-        spuriously flagged as a conflict at rest."""
-        for root, _dirs, files in os.walk(self.project):
-            for fn in files:
-                fp = os.path.join(root, fn)
-                # default: file was last touched during the session
-                os.utime(fp, (self.ended - 10.0, self.ended - 10.0))
+        """Write meta.json, sealing the session NOW — after every seed/modify,
+        the same order a real session follows. Files built above therefore
+        have mtime AND ctime <= ended and are never spuriously conflicted;
+        anything a test does after finalize() counts as post-session work."""
+        time.sleep(0.02)  # all prior ctimes strictly < ended
+        self.ended = time.time()
         meta = SessionMeta(
             id=self.sid, name="test", cwd=self.project,
             argv=["claude"], started=self.ended - 100.0, ended=self.ended,
@@ -388,6 +389,43 @@ class TestPlanPathsGlobs(RevertTestCase):
         got = [os.path.relpath(c.path, self.fx.project) for c in plan.restores]
         self.assertEqual(got, ["docs/readme.md"])
 
+    def test_scoped_revert_follows_rename_chain(self):
+        # session renamed A -> D (journal records it); asking to revert A
+        # must ALSO remove D, not strand a duplicate.
+        self.fx.seed("A.txt", "payload")
+        os.rename(self._abs("A.txt"), self._abs("D.txt"))
+        self.fx.finalize()
+        self._journal_rename("A.txt", "D.txt")
+
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan_paths(["A.txt"])
+        r.apply(plan, force=True)
+        self.assertTrue(self.fx.project_exists("A.txt"))
+        self.assertFalse(self.fx.project_exists("D.txt"),
+                         "renamed copy must not be stranded")
+
+    def test_scoped_revert_follows_transitive_chain(self):
+        # A -> B -> C recorded as two rename events; selecting A covers C.
+        self.fx.seed("A.txt", "payload")
+        os.rename(self._abs("A.txt"), self._abs("C.txt"))
+        self.fx.finalize()
+        self._journal_rename("A.txt", "B.txt")
+        self._journal_rename("B.txt", "C.txt")
+
+        plan = Reverter(paths.session_dir(self.fx.sid)).plan_paths(["A.txt"])
+        planned = {os.path.relpath(c.path, self.fx.project)
+                   for c in plan.restores + plan.deletes}
+        self.assertEqual(planned, {"A.txt", "C.txt"})
+
+    def _journal_rename(self, old_rel, new_rel, sid=None, t=None):
+        """Append a rename event to a session journal (fixture helper)."""
+        sid = sid or self.fx.sid
+        ev = {"kind": "fs", "op": "rename",
+              "path": self._abs(new_rel), "path_from": self._abs(old_rel),
+              "t": t if t is not None else (self.fx.ended or time.time()) - 1.0}
+        with open(paths.journal_path(sid), "a") as f:
+            f.write(json.dumps(ev) + "\n")
+
     def test_literal_path_with_brackets_still_matches(self):
         # Next.js-style dirs contain [] — they must behave as literal paths,
         # not fnmatch character classes (regression: glob detection dropped
@@ -399,6 +437,118 @@ class TestPlanPathsGlobs(RevertTestCase):
         plan = r.plan_paths(["app/[slug]/page.tsx"])
         got = [os.path.relpath(c.path, self.fx.project) for c in plan.restores]
         self.assertEqual(got, ["app/[slug]/page.tsx"])
+
+
+class TestMoveChainRobustness(RevertTestCase):
+    """The scenarios that broke the naive reverter: cross-session move
+    chains, type swaps, and post-session moves that mtime can't see."""
+
+    def _later_session_rename(self, old_rel, new_rel):
+        """Simulate a LATER session that renamed old->new: perform the move
+        and journal it in a second session dir inside the same store."""
+        sid2 = "2026-07-25T11-00-00_late"
+        os.makedirs(paths.session_dir(sid2), exist_ok=True)
+        with open(paths.meta_path(sid2), "w") as f:
+            json.dump({"id": sid2, "name": "later", "cwd": self.fx.project,
+                       "started": self.fx.ended + 1.0,
+                       "ended": self.fx.ended + 2.0}, f)
+        time.sleep(0.02)   # ctime of the move lands strictly after fx.ended
+        os.rename(self._abs(old_rel), self._abs(new_rel))
+        ev = {"kind": "fs", "op": "rename",
+              "path": self._abs(new_rel), "path_from": self._abs(old_rel),
+              "t": time.time()}
+        with open(paths.journal_path(sid2), "a") as f:
+            f.write(json.dumps(ev) + "\n")
+        return sid2
+
+    def test_cross_session_move_is_flagged_as_conflict(self):
+        # S1 renamed A->D; S2 renamed D->E. Reverting S1 must NOT silently
+        # delete E: mv preserves mtime, but ctime betrays the later move.
+        self.fx.seed("A.txt", "payload")
+        os.rename(self._abs("A.txt"), self._abs("D.txt"))
+        self.fx.finalize()
+        self._later_session_rename("D.txt", "E.txt")
+
+        plan = Reverter(paths.session_dir(self.fx.sid)).plan()
+        conflict_paths = {c.path for c in plan.conflicts}
+        self.assertIn(self._abs("E.txt"), conflict_paths,
+                      "post-session move must surface as a conflict")
+
+    def test_cross_session_chain_followed_by_scoped_revert(self):
+        # Scoped revert of A follows the chain THROUGH the later session's
+        # journal: with force, A comes back and E goes away — no duplicate.
+        self.fx.seed("A.txt", "payload")
+        os.rename(self._abs("A.txt"), self._abs("D.txt"))
+        self.fx.finalize()
+        with open(paths.journal_path(self.fx.sid), "a") as f:
+            f.write(json.dumps({"kind": "fs", "op": "rename",
+                                "path": self._abs("D.txt"),
+                                "path_from": self._abs("A.txt"),
+                                "t": self.fx.ended - 1.0}) + "\n")
+        self._later_session_rename("D.txt", "E.txt")
+
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan_paths(["A.txt"])
+        planned = {os.path.relpath(c.path, self.fx.project)
+                   for c in plan.restores + plan.deletes}
+        self.assertEqual(planned, {"A.txt", "E.txt"})
+        r.apply(plan, force=True)
+        self.assertTrue(self.fx.project_exists("A.txt"))
+        self.assertFalse(self.fx.project_exists("E.txt"),
+                         "no duplicate may be stranded across sessions")
+
+    def test_type_swap_dir_replaced_by_file(self):
+        # session: rm -rf dir/ then create a FILE named "dir".
+        # Revert must delete the file BEFORE restoring dir/x (ordering).
+        self.fx.seed("dir/x.txt", "inside")
+        os.remove(self._abs("dir/x.txt"))
+        os.rmdir(self._abs("dir"))
+        with open(self._abs("dir"), "w") as f:
+            f.write("i am a file now")
+        self.fx.finalize()
+
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan()
+        r.apply(plan, force=True)
+        self.assertEqual(plan.errors, [])
+        self.assertTrue(os.path.isdir(self._abs("dir")))
+        self.assertEqual(self.fx.read_project("dir/x.txt"), b"inside")
+
+    def test_type_swap_file_replaced_by_dir(self):
+        # session: rm file "x" then mkdir x/ with content.
+        # Revert must clear x/ (delete + prune) BEFORE restoring file x.
+        self.fx.seed("x", "plain file")
+        os.remove(self._abs("x"))
+        os.makedirs(self._abs("x"))
+        with open(self._abs("x/y.txt"), "w") as f:
+            f.write("nested")
+        self.fx.finalize()
+
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan()
+        r.apply(plan, force=True)
+        self.assertEqual(plan.errors, [])
+        self.assertTrue(os.path.isfile(self._abs("x")))
+        self.assertEqual(self.fx.read_project("x"), b"plain file")
+
+    def test_apply_collects_errors_instead_of_aborting(self):
+        # one unrestorable path must not stop the rest of the plan
+        self.fx.seed("good.txt", "orig")
+        self.fx.seed("bad.txt", "orig")
+        self.fx.modify("good.txt", "changed")
+        self.fx.modify("bad.txt", "changed")
+        self.fx.finalize()
+
+        r = Reverter(paths.session_dir(self.fx.sid))
+        plan = r.plan()
+        # sabotage one restore: replace the target with a directory
+        os.remove(self._abs("bad.txt"))
+        os.makedirs(self._abs("bad.txt"))
+        r.apply(plan, force=True)
+        self.assertEqual(self.fx.read_project("good.txt"), b"orig",
+                         "healthy paths must still be reverted")
+        self.assertTrue(any("bad.txt" in e for e in plan.errors),
+                        "the failed path must be reported")
 
 
 if __name__ == "__main__":

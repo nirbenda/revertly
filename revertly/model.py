@@ -59,6 +59,7 @@ class Event:
     t: float = field(default_factory=time.time)   # epoch seconds
     op: Optional[FsOp] = None
     path: Optional[str] = None
+    path_from: Optional[str] = None                # RENAME only: the old path
     tool: Optional[str] = None                     # e.g. "Edit", "Bash"
     target: Optional[str] = None                   # tool's target path/arg
     version: Optional[str] = None                  # e.g. "v3" for fs writes
@@ -85,6 +86,7 @@ class Event:
             t=d.get("t", 0.0),
             op=FsOp(d["op"]) if d.get("op") else None,
             path=d.get("path"),
+            path_from=d.get("path_from"),
             tool=d.get("tool"),
             target=d.get("target"),
             version=d.get("version"),
@@ -158,6 +160,7 @@ class RevertPlan:
     restores: list = field(default_factory=list)   # list[Change] modified/deleted -> restore
     deletes: list = field(default_factory=list)    # list[Change] created -> delete
     conflicts: list = field(default_factory=list)  # list[Conflict]
+    errors: list = field(default_factory=list)     # list[str] apply-time failures (filled by apply)
 
     @property
     def is_clean(self) -> bool:

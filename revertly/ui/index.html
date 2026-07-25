@@ -246,6 +246,7 @@ function renderEvents(container) {
   var shown = 0;
   events.forEach(function(ev){
     var label = ev.path || ev.target || ev.tool || ev.detail || "";
+    if (ev.op === "rename" && ev.path_from) label = ev.path_from + " → " + ev.path;
     if (q && !matches(label, q) && !matches(ev.kind, q) && !matches(ev.op || "", q)) return;
     var line = el("div", "ev" + (eventIsFlagged(ev, container._cwd) ? " flag" : ""));
     line.appendChild(el("span", "k", ev.kind + (ev.op ? "/" + ev.op : "")));
@@ -308,7 +309,8 @@ function runFind() {
       bySid[sid].forEach(function(h){
         var line = el("div", "hit" + ((h.kind !== "fs" || h.op === "delete") ? " risky" : ""));
         line.appendChild(el("span", "k", h.kind + (h.op ? "/" + h.op : "")));
-        line.appendChild(el("span", "p", (fmtTime(h.t) ? fmtTime(h.t) + "  " : "") + h.path));
+        var hLabel = (h.op === "rename" && h.path_from) ? (h.path_from + " → " + h.path) : h.path;
+        line.appendChild(el("span", "p", (fmtTime(h.t) ? fmtTime(h.t) + "  " : "") + hLabel));
         if (isUnder(h.path, h.cwd)) {
           var bDiff = el("button", "act mini", "diff");
           bDiff.addEventListener("click", function(){ jumpToDiff(h.session_id, h.path); });

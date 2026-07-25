@@ -284,6 +284,7 @@ def run_revert(session_id: str, paths_list, dry_run: bool, force: bool = False):
     payload["summary"] = summ() if callable(summ) else str(summ)
     payload["is_clean"] = bool(getattr(plan, "is_clean", True))
     payload["revert_id"] = revert_id
+    payload["errors"] = list(getattr(plan, "errors", []))
     # design rule: the UI shows the equivalent CLI for every action
     import shlex
     payload["cli"] = "revertly revert %s%s%s" % (

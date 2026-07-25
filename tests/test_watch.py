@@ -164,6 +164,51 @@ class TestPollingWatcher(unittest.TestCase):
             any(e.path == created and e.op == FsOp.CREATE for e in events),
             "stop() must emit the un-polled CREATE")
 
+    def test_rename_inferred_from_matching_signature(self):
+        # mv keeps the inode -> (mtime, size) identical -> RENAME, not
+        # delete+create.
+        old = os.path.join(self.root, "old.txt")
+        with open(old, "w") as f:
+            f.write("payload")
+        self.watcher = PollingWatcher(interval=30.0)
+        self.watcher.start(self.root, self.collector)
+
+        new = os.path.join(self.root, "new.txt")
+        os.rename(old, new)
+        self.watcher.stop()   # final sweep sees the move
+
+        events = self.collector.snapshot()
+        renames = [e for e in events if e.op == FsOp.RENAME]
+        self.assertEqual(len(renames), 1)
+        self.assertEqual(renames[0].path, new)
+        self.assertEqual(renames[0].path_from, old)
+        self.assertFalse(any(e.op in (FsOp.CREATE, FsOp.DELETE)
+                             and e.path in (old, new) for e in events),
+                         "a paired rename must not also emit create/delete")
+
+    def test_ambiguous_signatures_fall_back_to_create_delete(self):
+        # two identical files moved in one window -> pairing is ambiguous;
+        # never guess a rename.
+        a = os.path.join(self.root, "a.txt")
+        b = os.path.join(self.root, "b.txt")
+        with open(a, "w") as f:
+            f.write("same")
+        with open(b, "w") as f:
+            f.write("same")
+        os.utime(a, (1000.0, 1000.0)); os.utime(b, (1000.0, 1000.0))
+        self.watcher = PollingWatcher(interval=30.0)
+        self.watcher.start(self.root, self.collector)
+
+        os.rename(a, os.path.join(self.root, "a2.txt"))
+        os.rename(b, os.path.join(self.root, "b2.txt"))
+        self.watcher.stop()
+
+        events = self.collector.snapshot()
+        self.assertFalse(any(e.op == FsOp.RENAME for e in events),
+                         "ambiguous pairs must not be guessed")
+        self.assertEqual(sum(1 for e in events if e.op == FsOp.CREATE), 2)
+        self.assertEqual(sum(1 for e in events if e.op == FsOp.DELETE), 2)
+
     def test_events_carry_timestamp(self):
         self._start()
         p = os.path.join(self.root, "t.txt")

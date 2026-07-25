@@ -18,7 +18,7 @@ from typing import Optional
 from . import paths
 from .config import Config, load as load_config
 from .journal import Journal
-from .model import EventKind
+from .model import EventKind, FsOp
 
 
 def _load_meta(session_id):
@@ -110,7 +110,10 @@ def cmd_log(args) -> int:
             if not path_matches(e.path, args.path):
                 continue
         ts = time.strftime("%H:%M:%S", time.localtime(e.t))
-        print(f"{ts} {e.kind.value:11} {e.op.value if e.op else '':7} {e.path or e.tool or ''}")
+        label = e.path or e.tool or ""
+        if e.op == FsOp.RENAME and e.path_from:
+            label = f"{e.path_from} → {e.path}"
+        print(f"{ts} {e.kind.value:11} {e.op.value if e.op else '':7} {label}")
     return 0
 
 
@@ -142,7 +145,10 @@ def cmd_find(args) -> int:
             print(f"{h['session_id']}{name}")
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(h["t"] or 0))
         op = h["op"] or ""
-        print(f"  {ts}  {h['kind']}/{op:7} {h['path']}")
+        label = h["path"]
+        if op == "rename" and h.get("path_from"):
+            label = f"{h['path_from']} → {h['path']}"
+        print(f"  {ts}  {h['kind']}/{op:7} {label}")
         if h["kind"] == "fs" and op in ("delete", "write", "rename"):
             import shlex
             if paths.is_under(h["path"], h["cwd"]):
@@ -284,8 +290,14 @@ def cmd_revert(args) -> int:
     if not args.yes and not _confirm("proceed? [y/N] "):
         print("aborted."); return 1
     rid = r.apply(plan, force=args.force)
-    print(f"reverted. undo this revert with: revertly revert {rid}")
-    return 0
+    if rid is None:
+        print("nothing to revert (empty plan or all conflicts skipped).")
+        return 0
+    for err in plan.errors:
+        print(f"  ⚠ {err}")
+    print(f"reverted{' (with errors above)' if plan.errors else ''}. "
+          f"undo this revert with: revertly revert {rid}")
+    return 1 if plan.errors else 0
 
 
 def cmd_ui(args) -> int:

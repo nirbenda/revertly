@@ -105,7 +105,9 @@ def find_events(pattern: str, *, op: Optional[str] = None,
                 continue
             if since is not None and (ev.get("t") or 0) < since:
                 continue
-            if not path_matches(ev.get("path"), pattern):
+            # a rename is findable by EITHER end of the move
+            if not (path_matches(ev.get("path"), pattern)
+                    or path_matches(ev.get("path_from"), pattern)):
                 continue
             hits.append({
                 "session_id": sid,
@@ -114,6 +116,7 @@ def find_events(pattern: str, *, op: Optional[str] = None,
                 "kind": kind,
                 "op": ev.get("op"),
                 "path": ev.get("path"),
+                "path_from": ev.get("path_from"),
                 "t": ev.get("t"),
             })
     return hits
