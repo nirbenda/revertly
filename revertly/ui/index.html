@@ -85,6 +85,8 @@
   .hit .p { flex: 1; word-break: break-all; }
   .hit .k { color: var(--accent); min-width: 84px; }
   .hit.risky .k { color: var(--alert); }
+  .hit.sel { background: var(--panel2); box-shadow: inset 2px 0 0 var(--accent); }
+  .hit:hover { background: var(--panel2); }
   .ok-note { color: var(--ok); }
   .err-note { color: var(--alert); }
 
@@ -181,18 +183,14 @@
   </section>
 
   <section id="tab-diff" class="tab">
-    <div class="sub" style="margin-bottom:10px">Compare any file a session changed — its pre-image (before the session) against the current version on disk.</div>
+    <div class="sub" style="margin-bottom:10px">Compare any file a session changed — its pre-image (before the session) against the current version on disk. Click a file to see its diff.</div>
     <div class="toolbar">
       <label class="field"><span>Session</span><select id="diff-session"></select></label>
-      <label class="field"><span>File</span><select id="diff-path"></select></label>
-      <button class="act primary" id="diff-go">Show diff</button>
-      <span class="sub" style="margin:0 4px">inspect:</span>
-      <button class="act mini" id="diff-view-pre">view pre</button>
-      <button class="act mini" id="diff-view-cur">view current</button>
-      <button class="act mini" id="diff-dl-pre">⬇ pre</button>
-      <button class="act mini" id="diff-dl-cur">⬇ current</button>
+      <input type="text" id="diff-filter" placeholder="filter changed files…" style="flex:1;min-width:200px;align-self:flex-end">
+      <span class="sub" id="diff-count" style="align-self:flex-end"></span>
     </div>
-    <pre class="diff" id="diff-out">Pick a session, then a file it changed.</pre>
+    <div class="card" id="diff-files" style="max-height:300px;overflow:auto"></div>
+    <pre class="diff" id="diff-out">Pick a session, then click a file it changed.</pre>
   </section>
 
   <section id="tab-revert" class="tab">
@@ -503,8 +501,11 @@ function jumpToDiff(sid, path) {
   populateSessionPickers(function(){
     var ss = document.getElementById("diff-session"); ss.value = sid;
     loadDiffPaths(function(){
-      var ps = document.getElementById("diff-path"); ps.value = path;
-      document.getElementById("diff-go").click();
+      diffSelected = path;
+      // ensure the target file is visible even if it wasn't in the plan list
+      if (diffPaths.indexOf(path) === -1) { diffPaths.unshift(path); }
+      renderDiffFiles();
+      showDiff(sid, path);
     });
   });
 }
@@ -551,62 +552,62 @@ function changedPathsFor(sessionId, cb) {
   });
 }
 
-// ---- Diff ----
+// ---- Diff (searchable file list, click a file to diff it) ----
+var diffPaths = [], diffSelected = null;
 function loadDiffPaths(done) {
   var sel = document.getElementById("diff-session"); if (!sel.value) return;
-  var ps = document.getElementById("diff-path");
-  ps.innerHTML = ""; ps.appendChild(el("option", null, "loading…"));
+  var host = document.getElementById("diff-files");
+  host.innerHTML = ""; host.appendChild(el("div", "empty", "loading…"));
+  diffPaths = []; diffSelected = null;
+  document.getElementById("diff-out").textContent = "Pick a session, then click a file it changed.";
   changedPathsFor(sel.value, function(paths){
-    ps.innerHTML = "";
-    if (!paths.length) {
-      var o = el("option"); o.value = ""; o.textContent = "— no changed files in this session —"; o.disabled = true;
-      ps.appendChild(o);
-      document.getElementById("diff-out").textContent =
-        "This session has no file changes to compare (nothing differs from its pre-image).";
-    } else {
-      paths.forEach(function(p){ var o = el("option"); o.value = p; o.textContent = p; ps.appendChild(o); });
-    }
+    diffPaths = paths;
+    renderDiffFiles();
     if (done) done();
   });
 }
-document.getElementById("diff-session").addEventListener("change", function(){ loadDiffPaths(); });
-document.getElementById("diff-go").addEventListener("click", function(){
+function renderDiffFiles() {
+  var host = document.getElementById("diff-files"); host.innerHTML = "";
+  var q = document.getElementById("diff-filter").value;
   var sid = document.getElementById("diff-session").value;
-  var path = document.getElementById("diff-path").value;
-  if (!sid || !path) return;
+  var rows = diffPaths.filter(function(p){ return matches(p, q); });
+  document.getElementById("diff-count").textContent =
+    diffPaths.length ? (rows.length + " / " + diffPaths.length + " file(s)") : "";
+  if (!diffPaths.length) { host.appendChild(el("div", "empty", "No changed files in this session (nothing differs from its pre-image).")); return; }
+  if (!rows.length) { host.appendChild(el("div", "empty", "No files match the filter.")); return; }
+  rows.forEach(function(p){
+    var line = el("div", "hit" + (p === diffSelected ? " sel" : ""));
+    line.style.cursor = "pointer";
+    var label = el("span", "p", p); line.appendChild(label);
+    label.addEventListener("click", function(){ diffSelected = p; renderDiffFiles(); showDiff(sid, p); });
+    var bView = el("button", "act mini", "view pre");
+    bView.addEventListener("click", function(e){ e.stopPropagation(); viewPreimage(sid, p); });
+    var bDlP = el("button", "act mini", "⬇ pre");
+    bDlP.addEventListener("click", function(e){ e.stopPropagation(); window.open(fileURL(sid, p, "pre")); });
+    var bDlC = el("button", "act mini", "⬇ cur");
+    bDlC.addEventListener("click", function(e){ e.stopPropagation(); window.open(fileURL(sid, p, "cur")); });
+    line.appendChild(bView); line.appendChild(bDlP); line.appendChild(bDlC);
+    host.appendChild(line);
+  });
+}
+function showDiff(sid, path) {
+  var out = document.getElementById("diff-out");
+  out.textContent = "loading diff…";
   getJSON("/api/session/" + encodeURIComponent(sid) + "/diff?path=" + encodeURIComponent(path)).then(function(res){
-    var out = document.getElementById("diff-out"); out.innerHTML = "";
+    out.innerHTML = "";
     if (!res.ok) { out.textContent = (res.body && res.body.error) || "error"; return; }
-    var d = res.body.diff || "(no differences)";
+    var d = res.body.diff;
+    if (!d) { out.textContent = "(no textual differences — try 'view pre' / '⬇ pre' for the pre-image)"; return; }
     d.split("\n").forEach(function(line){
       var cls = "";
       if (line[0] === "+") cls = "add"; else if (line[0] === "-") cls = "del";
       else if (line[0] === "@") cls = "hd";
-      var span = el("span", cls, line + "\n"); out.appendChild(span);
+      out.appendChild(el("span", cls, line + "\n"));
     });
   });
-});
-function showWhole(which) {
-  var sid = document.getElementById("diff-session").value;
-  var path = document.getElementById("diff-path").value;
-  if (!sid || !path) return;
-  getJSON("/api/session/" + encodeURIComponent(sid) + "/diff?path=" + encodeURIComponent(path)).then(function(res){
-    var out = document.getElementById("diff-out"); out.innerHTML = "";
-    if (!res.ok) { out.textContent = (res.body && res.body.error) || "error"; return; }
-    var text = which === "pre" ? res.body.pre : res.body.cur;
-    out.textContent = text || "(" + which + " is empty or missing)";
-  });
 }
-document.getElementById("diff-view-pre").addEventListener("click", function(){ showWhole("pre"); });
-document.getElementById("diff-view-cur").addEventListener("click", function(){ showWhole("cur"); });
-document.getElementById("diff-dl-pre").addEventListener("click", function(){
-  var sid = document.getElementById("diff-session").value, p = document.getElementById("diff-path").value;
-  if (sid && p) window.open(fileURL(sid, p, "pre"));
-});
-document.getElementById("diff-dl-cur").addEventListener("click", function(){
-  var sid = document.getElementById("diff-session").value, p = document.getElementById("diff-path").value;
-  if (sid && p) window.open(fileURL(sid, p, "cur"));
-});
+document.getElementById("diff-session").addEventListener("change", function(){ loadDiffPaths(); });
+document.getElementById("diff-filter").addEventListener("input", debounce(renderDiffFiles, 120));
 
 // ---- Revert composer ----
 function loadRevertPaths() {
