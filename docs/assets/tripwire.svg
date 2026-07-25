@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
+  <style>
+    .fg  { fill: #c9d1d9; } .dim { fill: #8b949e; }
+    .grn { fill: #3fb950; } .red { fill: #f85149; } .yel { fill: #d29922; } .pur { fill: #bc8cff; }
+
+    .w1 { opacity: 0; animation: w1 10s linear infinite; }
+    .w2 { opacity: 0; animation: w2 10s linear infinite; }
+    .w3 { opacity: 0; animation: w3 10s linear infinite; }
+    @keyframes w1 { 0%,8%  {opacity:0} 9%,96%  {opacity:1} 100% {opacity:0} }
+    @keyframes w2 { 0%,22% {opacity:0} 23%,96% {opacity:1} 100% {opacity:0} }
+    @keyframes w3 { 0%,60% {opacity:0} 61%,96% {opacity:1} 100% {opacity:0} }
+
+    .toast { animation: toast 10s ease-out infinite; }
+    @keyframes toast {
+      0%,20%  { transform: translateX(320px); opacity: 0; }
+      26%,94% { transform: translateX(0);     opacity: 1; }
+      98%,100%{ transform: translateX(320px); opacity: 0; }
+    }
+    .pulse { animation: pulse 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes pulse { 0%,100% {opacity:1} 50% {opacity:0.35} }
+
+    @media (prefers-reduced-motion: reduce) {
+      .w1,.w2,.w3 { animation: none !important; opacity: 1 !important; }
+      .toast { animation: none !important; transform: none !important; opacity: 1 !important; }
+      .pulse { animation: none !important; }
+    }
+  </style>
+
+  <rect x="2" y="2" width="876" height="236" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+  <circle cx="26" cy="24" r="6" fill="#ff5f57"/>
+  <circle cx="46" cy="24" r="6" fill="#febc2e"/>
+  <circle cx="66" cy="24" r="6" fill="#28c840"/>
+  <text x="440" y="28" text-anchor="middle" class="dim">an injected session, mid-flight</text>
+  <line x1="2" y1="44" x2="878" y2="44" stroke="#21262d"/>
+
+  <g class="w1">
+    <text x="28" y="80"><tspan class="pur">●</tspan><tspan class="fg" x="46">Bash(echo '…' &gt; ~/Library/LaunchAgents/com.helper.plist)</tspan></text>
+    <text x="28" y="102" class="dim"><tspan xml:space="preserve">  └ hidden instructions in a README told it to persist</tspan></text>
+  </g>
+  <g class="w2">
+    <text x="28" y="140" class="red">⚠ tripwire: write ~/Library/LaunchAgents/com.helper.plist  [persistence]</text>
+    <text x="28" y="162" class="red">⚠ tripwire: append ~/.zshrc  [shell rc]</text>
+    <text x="28" y="184" class="dim">→ incident log + desktop notification, while it's happening</text>
+  </g>
+  <text x="28" y="216" class="w3 grn">$ revertly revert 7ee6 ~/Library/LaunchAgents ~/.zshrc   # footprint gone, project work kept</text>
+
+  <!-- macOS-style notification toast -->
+  <g class="toast">
+    <rect x="536" y="58" width="316" height="66" rx="12" fill="#1c2128" stroke="#30363d"/>
+    <circle cx="562" cy="91" r="13" fill="#2d2308" stroke="#d29922"/>
+    <text x="562" y="96" text-anchor="middle" class="yel pulse" font-size="14">⚠</text>
+    <text x="586" y="82" class="fg" font-size="12.5" font-weight="700">revertly — tripwire</text>
+    <text x="586" y="99" class="dim" font-size="11.5">write: ~/Library/LaunchAgents/…</text>
+    <text x="586" y="114" class="dim" font-size="11.5">session 2026-07-25_7ee6 · now</text>
+  </g>
+</svg>

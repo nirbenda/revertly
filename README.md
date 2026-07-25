@@ -1,79 +1,108 @@
-# revertly — a seatbelt, not a cage
+<div align="center">
 
-Run Claude Code (or any command) exactly as you always do. `revertly` sits
-invisibly underneath, records everything it touches, and can undo any of it —
-one bad edit, a trashed project, or an agent that decides to `rm -rf`.
+# revertly
 
-**Phase 1 (this repo): local, offline, zero-config, zero third-party deps.**
-Pure Python 3 stdlib — it runs on stock macOS with nothing to install.
+### a seatbelt, not a cage
 
-See `DESIGN.md`, `PRODUCT.md`, `THREAT-MODEL.md`, `TECH-DESIGN.md` for the full
-thinking. This README is how to use it.
+Run Claude Code (or any command) exactly as you always do. **revertly** sits invisibly
+underneath, records everything it touches, and can undo any of it — one bad edit,
+a trashed project, or an agent that decides to `rm -rf`.
 
-## Requirements
+![platform](https://img.shields.io/badge/platform-macOS%20(APFS)-black?logo=apple)
+![deps](https://img.shields.io/badge/dependencies-zero%20·%20pure%20python%20stdlib-3fb950)
+![tests](https://img.shields.io/badge/tests-111%20passing-58a6ff)
+![phase](https://img.shields.io/badge/phase%201-local%20·%20offline%20·%20zero%20config-bc8cff)
 
-- macOS (APFS) and `python3` — both already on a stock Mac. Nothing else.
+</div>
+
+<br>
+
+<p align="center">
+  <img src="docs/assets/demo.svg" width="880" alt="Animated demo: an agent session breaks the parser and deletes README.md; revertly diff shows exactly what changed; revertly revert restores everything.">
+</p>
+
+<p align="center"><sub>↑ real output from a real session — only the paths were shortened.</sub></p>
+
+## Why
+
+Sandboxes make agents safe by making them useless. revertly makes the **machine
+forgiving** instead of making the **agent constrained**: the agent runs at full
+speed, with no cage — and nothing it does can be permanent or invisible.
+
+- **Permanence — gone.** Every file the session creates, edits, or deletes has a
+  pre-image. `revertly revert` erases a session's entire footprint, including the
+  persistence tricks (shell rc, LaunchAgents) a human would never think to check.
+- **Invisibility — gone.** Sensitive paths are tripwired: touch `~/.ssh`, `.env`,
+  your shell rc — you get a desktop notification *while it happens*, not a
+  forensic surprise weeks later.
 
 ## Install
+
+Stock macOS is all you need — APFS and `python3` are already there.
 
 ```sh
 git clone <this-repo> revertly && cd revertly
 ./install.sh
+revertly doctor        # new terminal first — confirms shim order, snapshots, store health
 ```
 
-That's it. `install.sh` installs a `revertly` launcher and a `claude` shim into
-`~/.revertly/bin`, and adds that dir to your `PATH` (in a clearly-marked,
-reversible block in your shell profile). Open a **new terminal**, then:
+`install.sh` puts a `revertly` launcher and a `claude` shim in `~/.revertly/bin`
+and adds one clearly-marked, reversible block to your shell profile
+(`--no-profile` to skip that and add the PATH line yourself). From then on,
+`claude` works exactly as before — the net arms itself on every run.
+
+## The 60-second tour
 
 ```sh
-revertly doctor        # confirms the shim is first in PATH, snapshots work, etc.
-```
-
-Now use `claude` exactly as before — revertly arms the safety net automatically on
-every run. Prefer not to edit your profile? `./install.sh --no-profile` just
-prints the one PATH line to add yourself.
-
-## Getting started (60-second tour)
-
-```sh
-claude "refactor the parser"     # runs normally; revertly is recording underneath
-revertly last                       # what did that session touch? (+ integrity check)
-revertly diff                       # unified diff of every change, pre vs now
-revertly revert --dry-run           # preview an undo — changes nothing
-revertly revert                     # undo the session (asks first; non-destructive)
-revertly ui                         # open the visual control panel in your browser
+claude "refactor the parser"     # runs normally; revertly records underneath
+revertly last                    # what did that session touch? (+ integrity check)
+revertly diff                    # unified diff of every change, pre vs now
+revertly revert --dry-run        # preview the undo — changes nothing
+revertly revert                  # undo the session (asks first; non-destructive)
+revertly ui                      # visual control panel: timeline / diff / revert / live
 ```
 
 Escape hatches, any time:
 
 ```sh
-REVERTLY_DISABLE=1 claude …         # run once with no net
-revertly pause    /  revertly resume   # disarm/rearm without uninstalling
-REVERTLY_NO_SNAPSHOT=1 claude …     # skip the APFS snapshot layer for this run
+REVERTLY_DISABLE=1 claude …      # run once with no net
+revertly pause / revertly resume # disarm / rearm without uninstalling
+REVERTLY_NO_SNAPSHOT=1 claude …  # skip the APFS snapshot layer for one run
 ```
 
-## Uninstall
+## How the net is built
 
-```sh
-./uninstall.sh                   # removes shim + launcher + the PATH line
-./uninstall.sh --purge           # also delete ~/.revertly (all session history)
-```
+Before the wrapped command ever executes, four independent layers arm — each one
+covers for the failure (or sabotage) of the ones above it:
 
-Uninstalling leaves your real `claude` and your machine exactly as before —
-"leaving must be as clean as arriving." Session history is kept by default so a
-reinstall still has your revert points; add `--purge` to wipe it.
+<p align="center">
+  <img src="docs/assets/layers.svg" width="880" alt="The four layers: tripwires (real-time alerts), hash-chained journal (tamper-evident), copy-on-write clone (the revert source), and a root-gated APFS volume snapshot (disaster backstop).">
+</p>
 
-## What happens on every run
+1. **APFS snapshot** of the volume — taken first, deletable only by root, so the
+   disaster backstop already outranks a same-user agent.
+2. **CoW clone** (`cp -Rc`) of the project — the byte-exact pre-image every
+   revert restores from. Copy-on-write means it costs almost nothing.
+3. **Watcher + journal** — every create/write/delete lands in an append-only,
+   **hash-chained** `journal.jsonl`; sealed immutable (`chflags uchg`) on exit.
+4. **Tripwires** fire in real time on credentials, shell rc, LaunchAgents,
+   `.env` — and on revertly's own files (`SELF_TAMPER`, highest severity).
 
-1. **APFS snapshot** of the volume (disaster backstop; skip with
-   `REVERTLY_NO_SNAPSHOT=1`). Snapshot deletion needs root — so it already
-   outranks a same-user agent.
-2. **CoW clone** (`cp -Rc`) of the project dir — the exact pre-image reverts
-   restore from.
-3. **Watcher** journals every create/write/delete to a hash-chained
-   `journal.jsonl`, and fires **tripwires** (credentials, shell rc, launch
-   agents, `.env`, and revertly's own files) in real time.
-4. On exit: a one-line summary, and everything stays revertible.
+On exit you get one summary line, and everything stays revertible.
+
+## When it saves you
+
+<p align="center">
+  <img src="docs/assets/tripwire.svg" width="880" alt="Animated demo: an injected session writes a LaunchAgent; tripwires fire a desktop notification mid-session; one revert command removes the footprint while keeping legitimate work.">
+</p>
+
+| The day something goes wrong | What you do |
+|---|---|
+| Agent subtly broke a config, noticed days later | `revertly versions config/app.yaml` → `revertly revert --file config/app.yaml --to v0` — rest of the session's work untouched |
+| Agent deleted the project (`rm -rf`, hallucinated cleanup) | `revertly revert` → "restore 1,204 deleted files from clone" → back in seconds |
+| Prompt injection planted a LaunchAgent + edited `~/.zshrc` | Both tripwires fired mid-session; `revertly revert <session> ~/Library/LaunchAgents ~/.zshrc` — footprint gone, project work kept |
+| Injected agent read `~/.ssh/id_ed25519` | Read-tripwire alerts instantly → kill the session, `revertly log` confirms what was read, rotate that key |
+| You regret a revert | Reverts are sessions too: `revertly revert <revert-id>` — **nothing is ever lost** |
 
 ## Commands
 
@@ -92,45 +121,47 @@ revertly pause | resume | config
 revertly install [--no-profile] | uninstall [--purge]
 ```
 
-## Security model (what it does and doesn't protect)
+Reverts are **preview-first** (plan printed, confirmation required),
+**conflict-aware** (files you changed *after* the session are flagged, shown as
+a 3-way decision, never silently clobbered), and **non-destructive** (every
+revert is itself a session — you can always undo the undo).
+
+## Security model — the honest version
 
 revertly runs as *you*, same as the agent — so it can't *cage* a determined,
 hijacked agent. What it guarantees instead:
 
-- **Recoverability survives even total sabotage.** The snapshot + clone are
-  taken *before* the agent starts, and APFS snapshot deletion needs root — so
-  the disaster backstop is already out of a same-user agent's reach. Even
+- **Recoverability survives total sabotage.** Snapshot + clone are taken
+  *before* the agent starts, and APFS snapshot deletion needs root. Even
   `rm -rf ~/.revertly` can't make damage *permanent*.
-- **You can't be disabled quietly.** The journal is a **hash chain** (edits are
-  detectable — `revertly verify`), sealed journals are made **immutable**
-  (`chflags uchg`, so a naive `rm`/overwrite is denied), every tripwire and
-  self-tamper attempt is written to a cross-session **incident log** and fired
-  as a **desktop notification** the instant it happens, and revertly's own files
-  + your shell rc are the highest-severity `SELF_TAMPER` tripwires.
+- **It can't be disabled quietly.** The journal is a hash chain (`revertly verify`
+  detects edits), sealed journals are immutable, every tripwire and self-tamper
+  attempt hits a cross-session incident log *and* a desktop notification the
+  instant it happens.
 - **The watcher can't be silently blinded.** `revertly doctor` flags a config
   that broadens `exclude` to nothing or empties the tripwire set.
 
 Honest ceiling: this is tamper-**evidence** and tamper-**raising**, not
-tamper-**proof**. A determined same-UID attacker can `chflags nouchg` and delete
-— but only visibly, and never retroactively (the hash chain + root-gated
-snapshot see to that). True tamper-**resistance** is the Tier-2 root daemon /
-Tier-3 Endpoint Security build — see `THREAT-MODEL.md §9` for the full
-implemented-vs-roadmap matrix.
+tamper-**proofing**. A determined same-UID attacker can `chflags nouchg` and
+delete — but only visibly, and never retroactively. True tamper-*resistance* is
+the Tier-2 root daemon / Tier-3 Endpoint Security build — see
+[`THREAT-MODEL.md`](THREAT-MODEL.md) §9 for the implemented-vs-roadmap matrix.
 
-Revert is **non-destructive**: every revert is itself a session, so you can
-always `revertly revert <revert-id>` to undo an undo. Files changed *after* a
-session are flagged as conflicts and never silently overwritten (use `--force`).
+**Known Phase-1 limits, by design:** the watcher *polls* the project dir plus a
+bounded set of sensitive dirs (whole-`$HOME` and real read-auditing need the
+FSEvents/ES backend, later); the shim is an ergonomic default, not a security
+boundary; no blocking rules, telemetry, or admin — that's Phase 2.
 
-## Known Phase-1 limits (honest, by design)
+## Uninstall
 
-- The watcher **polls** the project dir + a bounded set of sensitive dirs.
-  Whole-`$HOME` coverage and real read-auditing need the FSEvents/`fanotify`
-  backend (later). `/etc` is not polled.
-- The shim is an **ergonomic default, not a security boundary** — a same-user
-  agent can bypass or disable it. Recoverability (root-gated snapshot) and
-  tamper-evidence (hash chain) survive that; true tamper-*resistance* needs the
-  Tier-2 root daemon / Tier-3 Endpoint Security build (see `THREAT-MODEL.md`).
-- No telemetry, admin, or blocking rules — that's Phase 2.
+```sh
+./uninstall.sh                   # removes shim + launcher + the PATH line
+./uninstall.sh --purge           # also delete ~/.revertly (all session history)
+```
+
+Leaving must be as clean as arriving: your real `claude` and your machine end up
+exactly as before. Session history is kept by default so a reinstall still has
+your revert points.
 
 ## Develop / test
 
@@ -138,6 +169,15 @@ session are flagged as conflicts and never silently overwritten (use `--force`).
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-111 tests (incl. an end-to-end lifecycle test and a security suite) across
+111 tests (including an end-to-end lifecycle test and a security suite) across
 model, config, journal, snapshot, clone, watch, tripwire, revert, session, ui,
 and hardening. TDD throughout.
+
+## Read more
+
+| Doc | What's in it |
+|---|---|
+| [`PRODUCT.md`](PRODUCT.md) | Object model, user flows S1–S11, Phase-2 fleet vision, success metrics |
+| [`DESIGN.md`](DESIGN.md) | Design principles and product thinking |
+| [`TECH-DESIGN.md`](TECH-DESIGN.md) | Architecture, invariants, module map |
+| [`THREAT-MODEL.md`](THREAT-MODEL.md) | Adversary tiers, attack trees, implemented-vs-roadmap matrix |

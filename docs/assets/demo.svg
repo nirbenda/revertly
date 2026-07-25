@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 348" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
+  <style>
+    .fg  { fill: #c9d1d9; }
+    .dim { fill: #8b949e; }
+    .grn { fill: #3fb950; }
+    .red { fill: #f85149; }
+    .yel { fill: #d29922; }
+    .blu { fill: #58a6ff; }
+    .pur { fill: #bc8cff; }
+    .b   { font-weight: 600; }
+
+    .scene, .ln { opacity: 0; }
+    .sA { animation: sA 24s linear infinite; }
+    .sB { animation: sB 24s linear infinite; }
+    .sC { animation: sC 24s linear infinite; }
+    @keyframes sA { 0%,31% {opacity:1} 33%,100% {opacity:0} }
+    @keyframes sB { 0%,33% {opacity:0} 34%,63% {opacity:1} 65%,100% {opacity:0} }
+    @keyframes sC { 0%,66% {opacity:0} 67%,97% {opacity:1} 99.5%,100% {opacity:0} }
+
+    .a1 { animation: a1 24s linear infinite; }  .a2 { animation: a2 24s linear infinite; }
+    .a3 { animation: a3 24s linear infinite; }  .a4 { animation: a4 24s linear infinite; }
+    .a5 { animation: a5 24s linear infinite; }  .a6 { animation: a6 24s linear infinite; }
+    .a7 { animation: a7 24s linear infinite; }
+    @keyframes a1 { 0%,2%   {opacity:0} 2.1%,100%  {opacity:1} }
+    @keyframes a2 { 0%,8.5% {opacity:0} 8.6%,100%  {opacity:1} }
+    @keyframes a3 { 0%,13%  {opacity:0} 13.1%,100% {opacity:1} }
+    @keyframes a4 { 0%,16%  {opacity:0} 16.1%,100% {opacity:1} }
+    @keyframes a5 { 0%,19%  {opacity:0} 19.1%,100% {opacity:1} }
+    @keyframes a6 { 0%,22%  {opacity:0} 22.1%,100% {opacity:1} }
+    @keyframes a7 { 0%,26%  {opacity:0} 26.1%,100% {opacity:1} }
+
+    .b1 { animation: b1 24s linear infinite; }  .b2 { animation: b2 24s linear infinite; }
+    .b3 { animation: b3 24s linear infinite; }  .b4 { animation: b4 24s linear infinite; }
+    @keyframes b1 { 0%,35%   {opacity:0} 35.1%,100% {opacity:1} }
+    @keyframes b2 { 0%,40.5% {opacity:0} 40.6%,100% {opacity:1} }
+    @keyframes b3 { 0%,44.5% {opacity:0} 44.6%,100% {opacity:1} }
+    @keyframes b4 { 0%,48.5% {opacity:0} 48.6%,100% {opacity:1} }
+
+    .c1 { animation: c1 24s linear infinite; }  .c2 { animation: c2 24s linear infinite; }
+    .c3 { animation: c3 24s linear infinite; }  .c4 { animation: c4 24s linear infinite; }
+    @keyframes c1 { 0%,68%   {opacity:0} 68.1%,100% {opacity:1} }
+    @keyframes c2 { 0%,73.5% {opacity:0} 73.6%,100% {opacity:1} }
+    @keyframes c3 { 0%,78%   {opacity:0} 78.1%,100% {opacity:1} }
+    @keyframes c4 { 0%,84%   {opacity:0} 84.1%,100% {opacity:1} }
+
+    .cover { fill: #0d1117; transform-box: fill-box; transform-origin: 100% 50%; }
+    .ctA { animation: ctA 24s steps(24,end) infinite; }
+    .ctB { animation: ctB 24s steps(14,end) infinite; }
+    .ctC { animation: ctC 24s steps(20,end) infinite; }
+    @keyframes ctA { 0%,2%  {transform:scaleX(1)} 7%,100%  {transform:scaleX(0)} }
+    @keyframes ctB { 0%,35% {transform:scaleX(1)} 39%,100% {transform:scaleX(0)} }
+    @keyframes ctC { 0%,68% {transform:scaleX(1)} 72%,100% {transform:scaleX(0)} }
+
+    @media (prefers-reduced-motion: reduce) {
+      .scene, .ln { animation: none !important; }
+      .sA, .sA .ln { opacity: 1 !important; }
+      .sB, .sC { opacity: 0 !important; }
+      .cover { display: none; }
+    }
+  </style>
+
+  <!-- terminal chrome -->
+  <rect x="2" y="2" width="876" height="344" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+  <circle cx="26" cy="24" r="6" fill="#ff5f57"/>
+  <circle cx="46" cy="24" r="6" fill="#febc2e"/>
+  <circle cx="66" cy="24" r="6" fill="#28c840"/>
+  <text x="440" y="28" text-anchor="middle" class="dim">~/prj/myapp</text>
+  <line x1="2" y1="44" x2="878" y2="44" stroke="#21262d"/>
+
+  <!-- scene labels -->
+  <text x="852" y="28" text-anchor="end" class="dim scene sA">1/3 · the agent goes rogue</text>
+  <text x="852" y="28" text-anchor="end" class="dim scene sB">2/3 · see exactly what happened</text>
+  <text x="852" y="28" text-anchor="end" class="dim scene sC">3/3 · undo all of it</text>
+
+  <!-- ══════════ scene A: the session ══════════ -->
+  <g class="scene sA">
+    <g class="ln a1">
+      <text x="28" y="78"><tspan class="grn b">$</tspan><tspan class="fg" x="46"> claude "refactor the parser"</tspan></text>
+      <rect class="cover ctA" x="52" y="65" width="240" height="18"/>
+    </g>
+    <text x="28" y="100" class="ln a2 dim">revertly: armed session 2026-07-25_7ee6 (snapshot+clone+watch active)</text>
+    <text x="28" y="130" class="ln a3"><tspan class="pur">●</tspan><tspan class="fg" x="46">Edit(src/parser.py)</tspan></text>
+    <text x="28" y="152" class="ln a4"><tspan class="pur">●</tspan><tspan class="fg" x="46">Write(src/utils.py)</tspan></text>
+    <text x="28" y="174" class="ln a5"><tspan class="pur">●</tspan><tspan class="fg" x="46">Bash(rm README.md)</tspan></text>
+    <text x="220" y="174" class="ln a6 red">⟵ hallucinated "cleanup"</text>
+    <text x="28" y="212" class="ln a7 grn">revertly: 3 files touched — 'revertly last' to inspect,</text>
+    <text x="28" y="232" class="ln a7 grn"><tspan x="98">'revertly revert 2026-07-25_7ee6' to undo</tspan></text>
+  </g>
+
+  <!-- ══════════ scene B: the diff ══════════ -->
+  <g class="scene sB">
+    <g class="ln b1">
+      <text x="28" y="78"><tspan class="grn b">$</tspan><tspan class="fg" x="46"> revertly diff</tspan></text>
+      <rect class="cover ctB" x="52" y="65" width="115" height="18"/>
+    </g>
+    <g class="ln b2">
+      <text x="28" y="100" class="dim">--- pre: src/parser.py</text>
+      <text x="28" y="120" class="dim">+++ cur: src/parser.py</text>
+      <text x="28" y="140" class="blu">@@ -1,2 +1,3 @@</text>
+      <text x="28" y="160" class="fg"><tspan xml:space="preserve"> def parse(x):</tspan></text>
+      <text x="28" y="180" class="red">-    return x.split(",")</text>
+      <text x="28" y="200" class="grn">+    # BUG: agent rewrote this</text>
+      <text x="28" y="220" class="grn">+    return x.split(";")</text>
+    </g>
+    <g class="ln b3">
+      <text x="28" y="248" class="dim">--- pre: README.md</text>
+      <text x="28" y="268" class="blu">@@ -1 +0,0 @@</text>
+      <text x="28" y="288" class="red">-# myapp</text>
+    </g>
+    <text x="28" y="318" class="ln b4 yel b">2 to restore, 1 to delete, 0 conflict(s)</text>
+  </g>
+
+  <!-- ══════════ scene C: the revert ══════════ -->
+  <g class="scene sC">
+    <g class="ln c1">
+      <text x="28" y="78"><tspan class="grn b">$</tspan><tspan class="fg" x="46"> revertly revert --yes</tspan></text>
+      <rect class="cover ctC" x="52" y="65" width="180" height="18"/>
+    </g>
+    <g class="ln c2">
+      <text x="28" y="104" class="fg">revert plan for 2026-07-25_7ee6: 2 to restore, 1 to delete, 0 conflict(s)</text>
+      <text x="28" y="128" class="grn"><tspan xml:space="preserve">  restore  src/parser.py</tspan></text>
+      <text x="28" y="148" class="grn"><tspan xml:space="preserve">  restore  README.md</tspan></text>
+      <text x="28" y="168" class="red"><tspan xml:space="preserve">  delete   src/utils.py</tspan></text>
+    </g>
+    <text x="28" y="204" class="ln c3 grn b">reverted. undo this revert with: revertly revert 2026-07-25_7339</text>
+    <g class="ln c4">
+      <text x="28" y="240" class="dim" font-style="italic"># every revert is itself a session — nothing is ever lost.</text>
+      <text x="28" y="272" class="fg"><tspan class="grn b">$</tspan><tspan class="dim" x="46"> ▍</tspan></text>
+    </g>
+  </g>
+</svg>

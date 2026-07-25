@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 420" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">
+  <style>
+    .fg  { fill: #c9d1d9; } .dim { fill: #8b949e; }
+    .grn { fill: #3fb950; } .red { fill: #f85149; }
+    .yel { fill: #d29922; } .blu { fill: #58a6ff; } .pur { fill: #bc8cff; }
+    .name  { font-size: 14px; font-weight: 700; }
+    .desc  { font-size: 12.5px; }
+    .badge { font-size: 11px; font-weight: 600; }
+  </style>
+
+  <rect x="2" y="2" width="876" height="416" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+
+  <!-- the agent, on top, unconstrained -->
+  <rect x="250" y="26" width="380" height="46" rx="10" fill="#161b22" stroke="#30363d"/>
+  <text x="440" y="45" text-anchor="middle" class="fg" font-size="14" font-weight="700">the agent runs here — full speed, no sandbox</text>
+  <text x="440" y="63" text-anchor="middle" class="dim" font-size="12">claude · or any command you wrap</text>
+
+  <path d="M 440 76 L 440 96" stroke="#8b949e" stroke-width="1.5"/>
+  <path d="M 434 90 L 440 98 L 446 90" fill="none" stroke="#8b949e" stroke-width="1.5"/>
+  <text x="452" y="94" class="dim" font-size="12">everything it does lands on the net:</text>
+
+  <!-- layer 1: tripwires -->
+  <g>
+    <rect x="60" y="110" width="760" height="58" rx="9" fill="#161b22" stroke="#30363d"/>
+    <rect x="60" y="110" width="4" height="58" rx="2" fill="#d29922"/>
+    <text x="82" y="134" class="yel name">tripwires</text>
+    <text x="82" y="154" class="desc dim">a touch on ~/.ssh, .env, shell rc, LaunchAgents → desktop notification, instantly</text>
+    <rect x="694" y="122" width="112" height="22" rx="11" fill="#2d2308" stroke="#d29922" stroke-opacity="0.5"/>
+    <text x="750" y="137" text-anchor="middle" class="badge yel">real-time alert</text>
+  </g>
+
+  <!-- layer 2: journal -->
+  <g>
+    <rect x="60" y="180" width="760" height="58" rx="9" fill="#161b22" stroke="#30363d"/>
+    <rect x="60" y="180" width="4" height="58" rx="2" fill="#58a6ff"/>
+    <text x="82" y="204" class="blu name">hash-chained journal</text>
+    <text x="82" y="224" class="desc dim">every create / write / delete, append-only, tamper-evident, sealed immutable on exit (chflags uchg)</text>
+    <rect x="686" y="192" width="120" height="22" rx="11" fill="#0c2039" stroke="#58a6ff" stroke-opacity="0.5"/>
+    <text x="746" y="207" text-anchor="middle" class="badge blu">revertly verify</text>
+  </g>
+
+  <!-- layer 3: CoW clone -->
+  <g>
+    <rect x="60" y="250" width="760" height="58" rx="9" fill="#161b22" stroke="#30363d"/>
+    <rect x="60" y="250" width="4" height="58" rx="2" fill="#3fb950"/>
+    <text x="82" y="274" class="grn name">copy-on-write clone</text>
+    <text x="82" y="294" class="desc dim">byte-exact pre-image of the project (cp -Rc), taken before the agent starts — ~free on APFS</text>
+    <rect x="686" y="262" width="120" height="22" rx="11" fill="#0f2a17" stroke="#3fb950" stroke-opacity="0.5"/>
+    <text x="746" y="277" text-anchor="middle" class="badge grn">revertly revert</text>
+  </g>
+
+  <!-- layer 4: APFS snapshot -->
+  <g>
+    <rect x="60" y="320" width="760" height="58" rx="9" fill="#161b22" stroke="#30363d"/>
+    <rect x="60" y="320" width="4" height="58" rx="2" fill="#bc8cff"/>
+    <text x="82" y="344" class="pur name">APFS volume snapshot</text>
+    <text x="82" y="364" class="desc dim">whole-disk backstop from session start — deleting it needs root, so it outranks any same-user agent</text>
+    <rect x="678" y="332" width="128" height="22" rx="11" fill="#241536" stroke="#bc8cff" stroke-opacity="0.5"/>
+    <text x="742" y="347" text-anchor="middle" class="badge pur">disaster-proof</text>
+  </g>
+
+  <text x="440" y="404" text-anchor="middle" class="dim" font-size="12" font-style="italic">any layer can be attacked loudly — none silently. even rm -rf ~/.revertly can't make damage permanent.</text>
+</svg>
