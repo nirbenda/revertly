@@ -122,6 +122,7 @@ revertly find <pattern> [--op delete] [--since 7d]
                                 search EVERY session — "what happened to X, when?"
 revertly diff [session] [path…] unified diff, pre-image vs current
 revertly versions <path>        which sessions can restore this file, and what each did to it
+revertly restore <path>         give one file/dir back from its newest pre-image (no session id)
 revertly revert [session] [path…|glob…] [--dry-run] [--force] [--yes]
 revertly rm <session…> [--force] PERMANENTLY delete sessions (the one destructive command)
 revertly ui [--port N]          control panel (timeline/find/diff/revert/live)
