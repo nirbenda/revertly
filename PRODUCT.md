@@ -195,11 +195,19 @@ things that make those attacks actually hurt: **permanence** and **invisibility*
    incident you don't wonder — you read.
 
 **Honest gap (and the roadmap answer):** data already *read and sent over the
-network* cannot be reverted. Phase 1 mitigates (read-tripwires alert in
-real time so you can kill the session; secrets under tripwire paths); Phase 2
-rules can *block* tripwire reads pre-execution via the hook layer, and the
-enterprise ES build extends read-audit beyond agent tools. We say this plainly
-rather than implying revert == exfil protection.
+network* cannot be reverted.
+
+> ⚠️ **Implementation status (Phase 1 as shipped):** read-tripwires described
+> in this section and in §2.4/§3/S6 are **not implemented**. The current
+> watcher is filesystem-polling and cannot observe *reads* at all — only
+> writes/creates/deletes/renames fire tripwires. The hook layer that would see
+> the agent's `Read`/`Grep`/`Bash` tools is Phase 2; broader read-auditing is
+> the enterprise Endpoint Security build. Until then, `on_read = "alert"` is
+> inert. Treat every read-detection claim below as roadmap, not behavior.
+
+Phase 2 rules can *block* tripwire reads pre-execution via the hook layer, and
+the enterprise ES build extends read-audit beyond agent tools. We say this
+plainly rather than implying revert == exfil protection.
 
 ---
 

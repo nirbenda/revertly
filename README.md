@@ -98,11 +98,19 @@ On exit you get one summary line, and everything stays revertible.
 
 | The day something goes wrong | What you do |
 |---|---|
-| Agent subtly broke a config, noticed days later | `revertly versions config/app.yaml` → `revertly revert --file config/app.yaml --to v0` — rest of the session's work untouched |
+| Agent subtly broke a config, noticed days later | `revertly versions config/app.yaml` → `revertly revert <session> config/app.yaml` — rest of the session's work untouched |
 | Agent deleted the project (`rm -rf`, hallucinated cleanup) | `revertly revert` → "restore 1,204 deleted files from clone" → back in seconds |
-| Prompt injection planted a LaunchAgent + edited `~/.zshrc` | Both tripwires fired mid-session; `revertly revert <session> ~/Library/LaunchAgents ~/.zshrc` — footprint gone, project work kept |
-| Injected agent read `~/.ssh/id_ed25519` | Read-tripwire alerts instantly → kill the session, `revertly log` confirms what was read, rotate that key |
+| Agent moved/renamed files (even a `A→B→C` chain) | Reverts are rename-aware: `revertly revert <session> A.txt` restores A and removes the moved copy — no stranded duplicate |
+| Injected agent wrote a LaunchAgent or edited `~/.zshrc` | A **tripwire fires** mid-session (notification + incident log) so you can stop it. In-project footprint reverts cleanly; **out-of-project files are alerted, not auto-reverted** — restore those from the APFS snapshot (see below) |
 | You regret a revert | Reverts are sessions too: `revertly revert <revert-id>` — **nothing is ever lost** |
+
+> **Scope, stated plainly:** revert restores from the pre-image **clone of the
+> project directory**. Files *outside* the project (`~/.zshrc`, LaunchAgents,
+> `/etc`) are **watched and alerted** — you'll know the instant one is touched —
+> but not journaled with a pre-image, so revert can't roll their *contents*
+> back. That's the volume-level APFS snapshot's job (a manual Recovery
+> restore). Read-auditing (catching a *read* of `~/.ssh/id_rsa`) needs the
+> Endpoint Security backend and is **not** in Phase 1 — see `THREAT-MODEL.md`.
 
 ## Commands
 
@@ -144,28 +152,37 @@ shows its equivalent CLI command.
 ## Security model — the honest version
 
 revertly runs as *you*, same as the agent — so it can't *cage* a determined,
-hijacked agent. What it guarantees instead:
+hijacked agent. What it does raise the cost of:
 
-- **Recoverability survives total sabotage.** Snapshot + clone are taken
-  *before* the agent starts, and APFS snapshot deletion needs root. Even
-  `rm -rf ~/.revertly` can't make damage *permanent*.
-- **It can't be disabled quietly.** The journal is a hash chain (`revertly verify`
-  detects edits), sealed journals are immutable, every tripwire and self-tamper
-  attempt hits a cross-session incident log *and* a desktop notification the
-  instant it happens.
-- **The watcher can't be silently blinded.** `revertly doctor` flags a config
-  that broadens `exclude` to nothing or empties the tripwire set.
+- **Recoverability is pre-positioned.** The snapshot (if enabled) and the clone
+  are taken *before* the agent starts. Deleting the clone or the store while a
+  session is live **fires a SELF_TAMPER alert** (dedicated sentinels watch the
+  store, the shim, and shell-rc files); a same-UID attacker can still remove
+  them, but not silently.
+- **Tamper leaves evidence.** The journal is a hash chain, sealed journals are
+  made immutable, and seal writes an immutable anchor so `revertly verify`
+  catches even a clean-prefix **truncation** — not just in-place edits. Every
+  tripwire, self-tamper, and *disable* action (`pause`, `rm`, `REVERTLY_DISABLE`)
+  writes a cross-session incident line and a desktop notification.
+- **Blinding is announced.** A config that broadens `exclude` to nothing or
+  empties the tripwire set is flagged at **arm time** (and by `revertly doctor`).
+- **Secrets in the store are contained.** The store root is `0700`, so other
+  local users can't read the project clones it holds.
 
-Honest ceiling: this is tamper-**evidence** and tamper-**raising**, not
-tamper-**proofing**. A determined same-UID attacker can `chflags nouchg` and
-delete — but only visibly, and never retroactively. True tamper-*resistance* is
-the Tier-2 root daemon / Tier-3 Endpoint Security build — see
-[`THREAT-MODEL.md`](THREAT-MODEL.md) §9 for the implemented-vs-roadmap matrix.
+**Honest ceiling — read this.** This is tamper-**evidence** and
+tamper-**raising**, not tamper-**proofing**. A same-UID attacker can `chflags
+nouchg` then delete/rewrite, or bypass the shim entirely — the guarantees above
+make that *loud and logged*, not *impossible*. Recoverability of *out-of-project*
+damage depends on the APFS snapshot, which is skippable (`REVERTLY_NO_SNAPSHOT`)
+and not wired into `revertly revert` (it's a manual Recovery restore). True
+tamper-*resistance* and a root-owned mirror are the Tier-2 daemon / Tier-3
+Endpoint Security build — see [`THREAT-MODEL.md`](THREAT-MODEL.md) §9 for the
+implemented-vs-roadmap matrix.
 
-**Known Phase-1 limits, by design:** the watcher *polls* the project dir plus a
-bounded set of sensitive dirs (whole-`$HOME` and real read-auditing need the
-FSEvents/ES backend, later); the shim is an ergonomic default, not a security
-boundary; no blocking rules, telemetry, or admin — that's Phase 2.
+**Known Phase-1 limits, by design:** the watcher *polls* (sub-second churn and
+mtime-preserving edits can slip; `/etc` isn't polled); **reads are not detected**
+(no read-tripwires — that needs the ES backend); the shim is an ergonomic
+default, not a security boundary; no blocking rules, telemetry, or admin — Phase 2.
 
 ## Uninstall
 
@@ -184,9 +201,9 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-111 tests (including an end-to-end lifecycle test and a security suite) across
-model, config, journal, snapshot, clone, watch, tripwire, revert, session, ui,
-and hardening. TDD throughout.
+169 tests (including an end-to-end lifecycle test, a security/tamper suite, and
+move-chain/data-loss regressions) across model, config, journal, snapshot,
+clone, watch, tripwire, search, revert, session, ui, and hardening. TDD throughout.
 
 ## Read more
 
