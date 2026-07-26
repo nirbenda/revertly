@@ -12,13 +12,21 @@ instant the agent touches something sensitive (SSH keys, `.env`, shell config).
 
 Everything is local. No accounts, no network, nothing leaves your machine.
 
+![CI](https://github.com/nirbendavid/revertly/actions/workflows/ci.yml/badge.svg)
 ![platform](https://img.shields.io/badge/macOS-APFS-black?logo=apple)
-![works with](https://img.shields.io/badge/works%20with-Claude%20Code-bc8cff)
+![works with](https://img.shields.io/badge/agents-Claude%20·%20Codex%20·%20Gemini%20·%20Aider%20·%20Cursor-bc8cff)
 ![deps](https://img.shields.io/badge/dependencies-zero%20·%20pure%20python%20stdlib-3fb950)
 ![tests](https://img.shields.io/badge/tests-191%20passing-58a6ff)
 ![phase](https://img.shields.io/badge/phase%201-local%20·%20offline-3fb950)
 
 </div>
+
+> ⚠️ **Phase 1 — experimental.** Local, **macOS (APFS) only**, single-machine.
+> It's a developer safety net that's **tamper-evident, not tamper-proof** (a
+> same-UID/hijacked agent can be *loud and logged*, not *stopped* — see
+> [`THREAT-MODEL.md`](THREAT-MODEL.md)). Not yet a managed/fleet security
+> control. Try it, break it, tell us — but don't deploy it as your only
+> guardrail.
 
 <br>
 
@@ -71,12 +79,14 @@ only inside a tool — it's all plain files under `~/.revertly`.
   filesystems are on the roadmap (the watcher and revert engine are portable;
   the clone/snapshot layer is what's macOS-specific today).
 - **Runtime:** `python3` — already on a stock Mac. **Zero third-party dependencies.**
-- **Agent:** **Claude Code** works out of the box — `install.sh` drops in a
-  `claude` shim that arms the net on every run. Under the hood revertly wraps
-  *any* command (`revertly shim -- <cmd> …`), so it isn't Claude-specific;
-  first-class shims for other agents (Cursor, Codex CLI, Aider, Antigravity, …)
-  are a natural next step and planned. The recording is filesystem-level, so it
-  already captures whatever *any* of them — or a script they run — does on disk.
+- **Agents:** `install` **detects the agent CLIs on your PATH and binds the
+  ones you choose** — **Claude Code, Codex, Gemini, Aider, Cursor CLI** and more
+  (`revertly agents` to list, `revertly bind <cmd>` for any other). Every bound
+  agent gets the filesystem watcher **and** the harness-agnostic command guard
+  (secret-read / `curl|sh` / persistence detection). Claude Code *additionally*
+  gets a hook for higher-fidelity tool-call inspection. GUI/IDE agents (the
+  Cursor app, Copilot in VS Code) can't be shimmed — an ambient watch mode for
+  those is planned.
 
 ## Install
 
