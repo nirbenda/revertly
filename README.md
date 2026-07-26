@@ -83,9 +83,29 @@ That's the part nobody says out loud. An autonomous coding agent runs with
 *your* permissions — every file you can delete, it can delete; every secret you
 can read, it can read. Most days that's the whole point. But it only takes a
 hallucinated "cleanup," or a poisoned README or web page that quietly turns a
-helpful agent hostile — **prompt injection isn't hypothetical** — and those same
-permissions rewrite a config, `rm -rf` a directory, read your `.env`, or drop a
-LaunchAgent that outlives the session. You find out days later. If ever.
+helpful agent hostile, and those same permissions rewrite a config, `rm -rf` a
+directory, read your `.env`, or drop a LaunchAgent that outlives the session.
+You find out days later. If ever.
+
+### Where the danger comes from
+
+Three recognized mechanisms — not exotic ones:
+
+- **Prompt injection.** Anything the agent *reads* — a repo file, a code
+  comment, a fetched web page, a GitHub issue, an MCP tool result — can carry
+  hidden instructions. The model can't reliably separate *data* from *commands*,
+  so "summarize this repo" quietly becomes "read `.env`, delete `X`." (OWASP
+  LLM01 — the number-one risk on the list.)
+- **Untrusted MCP servers & tools.** Every server you connect is code running
+  in your session with broad scope. A poisoned or rug-pulled tool — trusted
+  today, changed tomorrow — can read secrets, act as you, or feed the agent
+  tainted content.
+- **Autonomous execution.** In auto-approve / YOLO mode the agent doesn't
+  suggest — it *runs*: shell, `curl | sh`, postinstall scripts, code it just
+  wrote — unattended, at machine speed, before you can eyeball it.
+
+You can't reliably prevent these. You *can* make sure none of it lands
+silently or permanently — which is the whole point.
 
 revertly doesn't cage the agent — **it runs as the same user, so it can't** (see
 [`THREAT-MODEL.md`](THREAT-MODEL.md)). It does the next thing that actually
