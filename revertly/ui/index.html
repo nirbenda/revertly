@@ -139,6 +139,28 @@
     border: 1px solid var(--alert); border-radius: 8px; margin-top: 12px;
     box-shadow: 0 -6px 20px rgba(0,0,0,.35); }
   .clear-bar .grow { flex: 1; }
+
+  /* Security feed */
+  .sec-tile { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 14px; min-width: 90px; }
+  .sec-tile .n { font-size: 20px; font-weight: 700; }
+  .sec-tile .l { font-size: 11px; color: var(--muted); }
+  .sec-tile.crit { border-color: rgba(255,92,92,.5); }
+  .sec-tile.crit .n { color: var(--alert); }
+  .sec-tile.warn { border-color: rgba(230,180,90,.5); }
+  .sec-tile.warn .n { color: var(--warn); }
+  .sec-row { display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+    border-bottom: 1px solid var(--line); font-size: 12px; border-left: 3px solid transparent; }
+  .sec-row:last-child { border-bottom: 0; }
+  .sec-row.crit { border-left-color: var(--alert); }
+  .sec-row.warn { border-left-color: var(--warn); }
+  .sec-row .when { color: var(--muted); min-width: 150px; font-family: ui-monospace, Menlo, monospace; }
+  .sec-row .kind { min-width: 96px; font-weight: 600; }
+  .sec-row.crit .kind { color: var(--alert); }
+  .sec-row.warn .kind { color: var(--warn); }
+  .sec-row .detail { flex: 1; word-break: break-all; font-family: ui-monospace, Menlo, monospace; }
+  .sec-row .sess { color: var(--accent); cursor: pointer; font-size: 11px; }
+  .sec-row .sess:hover { text-decoration: underline; }
 </style>
 
 <header>
@@ -151,6 +173,7 @@
   <button data-tab="find">Find</button>
   <button data-tab="diff">Diff</button>
   <button data-tab="revert">Revert</button>
+  <button data-tab="security">Security</button>
   <button data-tab="storage">Storage</button>
   <button data-tab="live">Live</button>
 </nav>
@@ -205,6 +228,21 @@
     </div>
     <div class="card" id="rev-paths"></div>
     <div class="summary" id="rev-summary" style="display:none"></div>
+  </section>
+
+  <section id="tab-security" class="tab">
+    <div class="sub" style="margin-bottom:10px">Everything security-relevant across all sessions — secret reads, suspicious/blocked commands, tripwires, self-tamper, and disable/bypass actions. The instant something fires, it lands here.</div>
+    <div id="sec-tiles" class="toolbar" style="gap:10px"></div>
+    <div class="toolbar">
+      <input type="text" id="sec-filter" placeholder="filter — text, session, kind…" style="flex:1;min-width:200px">
+      <select id="sec-cat">
+        <option value="alerts">security alerts only</option>
+        <option value="all">everything (incl. housekeeping)</option>
+      </select>
+      <button class="act" id="sec-refresh">Refresh</button>
+      <span class="sub" id="sec-count"></span>
+    </div>
+    <div id="sec-feed"></div>
   </section>
 
   <section id="tab-storage" class="tab">
@@ -311,6 +349,7 @@ navButtons.forEach(function(btn){
     document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
     if (btn.dataset.tab === "diff" || btn.dataset.tab === "revert") populateSessionPickers();
     if (btn.dataset.tab === "storage") loadStorage();
+    if (btn.dataset.tab === "security") loadSecurity();
   });
 });
 function switchTab(name) {
@@ -923,6 +962,83 @@ document.querySelectorAll("#tab-storage .chip").forEach(function(ch){
     syncChips(); renderStorageRows();
   });
 });
+
+// ---- Security (cross-session incident feed) ----
+// classify each incident tag into a severity/category
+var SEC_CRIT = { "SELF_TAMPER": 1, "SELF-TAMPER": 1, "SUSPICIOUS": 1, "READ": 1 };
+var SEC_WARN = { "TRIPWIRE": 1, "BYPASS": 1, "PRUNE-FAIL": 1, "RETENTION-FAIL": 1, "CONFIG": 1 };
+var SEC_HOUSEKEEPING = { "PRUNE": 1, "GC": 1, "RM": 1, "PAUSE": 1 };
+function secClass(tag) { return SEC_CRIT[tag] ? "crit" : (SEC_WARN[tag] ? "warn" : ""); }
+function secIsAlert(tag) { return !SEC_HOUSEKEEPING[tag]; }
+function secLabel(tag) {
+  return ({ "SELF_TAMPER": "SELF-TAMPER", "READ": "SECRET READ",
+            "SUSPICIOUS": "SUSPICIOUS", "TRIPWIRE": "TRIPWIRE",
+            "BYPASS": "BYPASS", "RM": "DELETED", "PRUNE": "PRUNED",
+            "PAUSE": "PAUSED" })[tag] || tag;
+}
+var secData = [];
+function loadSecurity() {
+  getJSON("/api/incidents").then(function(res){
+    secData = (res.body && res.body.records) || [];
+    renderSecurity();
+  });
+}
+function renderSecurity() {
+  var q = document.getElementById("sec-filter").value;
+  var cat = document.getElementById("sec-cat").value;
+  var rows = secData.filter(function(r){
+    if (cat === "alerts" && !secIsAlert(r.tag)) return false;
+    return matches(r.tag, q) || matches(r.detail, q) || matches(r.session, q);
+  });
+  // tiles: counts by category over the FULL (unfiltered) alert set
+  var counts = { reads: 0, susp: 0, tamper: 0, trip: 0, bypass: 0 };
+  secData.forEach(function(r){
+    if (r.tag === "READ") counts.reads++;
+    else if (r.tag === "SUSPICIOUS") counts.susp++;
+    else if (r.tag === "SELF_TAMPER" || r.tag === "SELF-TAMPER") counts.tamper++;
+    else if (r.tag === "TRIPWIRE") counts.trip++;
+    else if (r.tag === "BYPASS") counts.bypass++;
+  });
+  var tiles = document.getElementById("sec-tiles"); tiles.innerHTML = "";
+  function tile(n, label, cls) {
+    var t = el("div", "sec-tile" + (n && cls ? " " + cls : ""));
+    t.appendChild(el("div", "n", String(n)));
+    t.appendChild(el("div", "l", label));
+    tiles.appendChild(t);
+  }
+  tile(counts.reads, "secret reads", "crit");
+  tile(counts.susp, "suspicious cmds", "crit");
+  tile(counts.tamper, "self-tamper", "crit");
+  tile(counts.trip, "tripwires", "warn");
+  tile(counts.bypass, "bypass/disable", "warn");
+
+  document.getElementById("sec-count").textContent = rows.length + " event(s)";
+  var feed = document.getElementById("sec-feed"); feed.innerHTML = "";
+  if (!secData.length) { feed.appendChild(el("div", "empty", "No security events yet — nothing suspicious has fired.")); return; }
+  if (!rows.length) { feed.appendChild(el("div", "empty", "No events match.")); return; }
+  var card = el("div", "card");
+  rows.forEach(function(r){
+    var line = el("div", "sec-row " + secClass(r.tag));
+    line.appendChild(el("span", "when", r.t));
+    line.appendChild(el("span", "kind", secLabel(r.tag)));
+    line.appendChild(el("span", "detail", r.detail));
+    if (r.session && r.session !== "-") {
+      var s = el("span", "sess", r.session);
+      s.addEventListener("click", function(){ openSessionTimeline(r.session); });
+      line.appendChild(s);
+    }
+    card.appendChild(line);
+  });
+  feed.appendChild(card);
+}
+function openSessionTimeline(sid) {
+  switchTab("timeline");
+  document.getElementById("tl-filter").value = sid;
+  renderTimeline();
+}
+document.getElementById("sec-refresh").addEventListener("click", loadSecurity);
+document.getElementById("sec-filter").addEventListener("input", debounce(renderSecurity, 120));
+document.getElementById("sec-cat").addEventListener("change", renderSecurity);
 
 // ---- Live ----
 function renderLive(rows) {

@@ -353,6 +353,20 @@ class TestHttpServer(_StoreFixture):
         status, data = self._post_json("/api/clear", {"dry_run": True})
         self.assertEqual(status, 400)
 
+    def test_api_incidents_feed(self):
+        # write a couple of incident lines and confirm the feed parses them
+        from revertly import paths as _p
+        with open(_p.incidents_log(), "a") as f:
+            f.write("2026-07-26T12:00:00\t%s\tREAD\tRead of ~/.ssh/id_rsa\n" % self.SESSION_ID)
+            f.write("2026-07-26T12:01:00\t-\tBYPASS\tREVERTLY_DISABLE set\n")
+        status, data = self._get_json("/api/incidents")
+        self.assertEqual(status, 200)
+        tags = [r["tag"] for r in data["records"]]
+        self.assertIn("READ", tags)
+        self.assertIn("BYPASS", tags)
+        # newest first
+        self.assertEqual(data["records"][0]["tag"], "BYPASS")
+
     def test_host_is_loopback_parsing(self):
         self.assertTrue(server._host_is_loopback("127.0.0.1:8721"))
         self.assertTrue(server._host_is_loopback("localhost"))

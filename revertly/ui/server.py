@@ -132,6 +132,28 @@ def list_sessions():
     return rows
 
 
+def incidents_feed(limit: int = 1000):
+    """The cross-session security feed: every tripwire, self-tamper, secret
+    read, blocked/suspicious command, and disable/prune action, newest first.
+    Sourced from the single append-only incidents.log."""
+    p = paths.incidents_log()
+    rows = []
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        lines = []
+    for line in lines[-limit:]:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 3:
+            continue
+        ts, sid, tag = parts[0], parts[1], parts[2]
+        detail = parts[3] if len(parts) > 3 else ""
+        rows.append({"t": ts, "session": sid, "tag": tag.upper(), "detail": detail})
+    rows.reverse()  # newest first
+    return {"records": rows, "total": len(rows)}
+
+
 def load_session(session_id: str):
     """Full session: {meta, events}, or None if unknown."""
     meta = _read_meta(session_id)
@@ -468,6 +490,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(list_sessions())
         if path == "/api/storage":
             return self._send_json(storage_summary())
+        if path == "/api/incidents":
+            return self._send_json(incidents_feed())
         if path == "/api/find":
             return self._serve_find(query)
 

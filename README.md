@@ -213,7 +213,7 @@ revertly rm <session…> [--force]      permanently delete specific sessions
 **Set up, inspect, and check health**
 ```
 revertly install [--no-profile]  add the claude shim to your PATH
-revertly ui [--port N]           visual control panel (timeline/find/diff/revert/storage/live)
+revertly ui [--port N]           visual control panel (timeline/find/diff/revert/security/storage/live)
 revertly doctor                  is the net armed and healthy? (incl. a security section)
 revertly verify [session|--all]  audit journal hash chains for tampering
 revertly pause | resume          disarm / rearm without uninstalling
