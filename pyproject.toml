@@ -26,7 +26,7 @@ classifiers = [
 revertly = "revertly.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/nirbendavid/revertly"
+Homepage = "https://github.com/nirbenda/revertly"
 
 [tool.setuptools]
 packages = ["revertly", "revertly.ui"]

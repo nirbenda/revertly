@@ -43,5 +43,5 @@ dependencies. **Experimental** — see the honest limits in `THREAT-MODEL.md`.
   composer (inspect pre-images without reverting), Storage, live **Security**
   feed, Live.
 
-[Unreleased]: https://github.com/nirbendavid/revertly/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/nirbendavid/revertly/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nirbenda/revertly/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nirbenda/revertly/releases/tag/v0.1.0
