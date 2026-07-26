@@ -32,11 +32,17 @@ git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
   <br><sub>↑ real output from a real session — only the paths were shortened.</sub>
 </p>
 
-> ⚠️ **Phase 1 — experimental.** Local, **macOS (APFS) only**, single-machine.
-> A developer safety net that's **tamper-evident, not tamper-proof** (a
-> same-UID/hijacked agent is made *loud and logged*, not *stopped* — see
-> [`THREAT-MODEL.md`](THREAT-MODEL.md)). Not yet a managed/fleet security control.
-> Try it, break it, tell us — but don't make it your only guardrail.
+<details>
+<summary><b>⚠️ Phase 1 — experimental.</b> Local, macOS (APFS) only, single-machine. <i>(read before you deploy)</i></summary>
+
+<br>
+
+A developer safety net that's **tamper-evident, not tamper-proof** — a
+same-UID/hijacked agent is made *loud and logged*, not *stopped* (see
+[`THREAT-MODEL.md`](THREAT-MODEL.md)). Not yet a managed/fleet security control.
+Try it, break it, tell us — but don't make it your only guardrail.
+
+</details>
 
 ## Why
 
@@ -59,6 +65,12 @@ speed, with no cage — and nothing it does can be permanent or invisible.
 | Alert on secret reads / persistence |          ❌            |    ✅ live       |           ❌            |
 | Tamper-evident record of the run  |           ❌            |       ✅        |           ❌            |
 | Setup cost                        |     high (rebuild env) |   one line     |          none           |
+
+### Three moves, one tool
+
+| 🟠&nbsp; **RECORD** | 🟢&nbsp; **REVERT** | 🔴&nbsp; **GUARD** |
+|---|---|---|
+| Every create / edit / delete / rename lands in a **hash-chained journal** against a copy-on-write pre-image, taken before the agent starts. | Undo **one file, one session, or a whole `rm -rf`** — preview-first, rename-aware, and itself undoable. Nothing is ever lost. | Secret reads, `curl \| sh`, and persistence tricks (LaunchAgents, shell rc) trip a **live alert** the instant they fire. |
 
 ## How it works (the mental model)
 
@@ -104,7 +116,7 @@ only inside a tool — it's all plain files under `~/.revertly`.
 Stock macOS is all you need — APFS and `python3` are already there.
 
 ```sh
-git clone <this-repo> revertly && cd revertly
+git clone https://github.com/nirbenda/revertly && cd revertly
 ./install.sh           # detects your agent CLIs and asks which to bind
 revertly doctor        # new terminal first — confirms shim order, snapshots, store health
 ```
@@ -144,6 +156,17 @@ REVERTLY_DISABLE=1 claude …      # run once with no net
 revertly pause / revertly resume # disarm / rearm without uninstalling
 REVERTLY_NO_SNAPSHOT=1 claude …  # skip the APFS snapshot layer for one run
 ```
+
+### The control panel
+
+Prefer to point and click? `revertly ui` opens a local, offline panel — timeline,
+cross-session **Find**, diffs, one-click **revert**, a **live security feed**, and
+storage cleanup. Every action shows its equivalent CLI command; tabs are
+bookmarkable via `#hash`.
+
+<p align="center">
+  <img src="docs/assets/panel.png" width="900" alt="revertly control panel — the Timeline tab showing recorded sessions with armed / tripwire / revert badges, and one session's event stream (writes, a rename, a delete) with the rm command and the ~/.ssh read flagged in red.">
+</p>
 
 ## How the net is built
 
@@ -336,7 +359,7 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-191 tests (including an end-to-end lifecycle test, a security/tamper suite,
+228 tests (including an end-to-end lifecycle test, a security/tamper suite,
 move-chain/data-loss regressions, and the retention planner) across model,
 config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
 session, cli, ui, and hardening. TDD throughout.
