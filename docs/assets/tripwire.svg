@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 240" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="13">
   <style>
     .fg  { fill: #c9d1d9; } .dim { fill: #8b949e; }
-    .grn { fill: #3fb950; } .red { fill: #f85149; } .yel { fill: #d29922; } .pur { fill: #bc8cff; }
+    .grn { fill: #3DDC97; } .red { fill: #FF6B6B; } .yel { fill: #d29922; } .pur { fill: #bc8cff; }
 
     .w1 { opacity: 0; animation: w1 10s linear infinite; }
     .w2 { opacity: 0; animation: w2 10s linear infinite; }

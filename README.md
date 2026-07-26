@@ -1,23 +1,23 @@
 <div align="center">
 
-# revertly
+<img src="docs/assets/hero.svg" width="840" alt="revertly — a seatbelt for AI coding agents, not a cage">
 
-### a seatbelt for AI coding agents — not a cage
+<p><b>Let the agent go full speed. Undo anything it does. Catch the sketchy stuff live.</b></p>
 
-You run **Claude Code** exactly as you always do. **revertly** sits underneath it:
-it snapshots your project *before* the agent starts, records every file the agent
-(or anything it runs) creates, changes, deletes, or renames, and lets you undo any
-of it — one file, one session, or a whole `rm -rf`. It also trips an alert the
-instant the agent touches something sensitive (SSH keys, `.env`, shell config).
+<p>
+Run <b>Claude Code · Codex · Cursor</b> exactly as you always do — revertly sits underneath,
+snapshots your project <i>before</i> the agent starts, records every file it (or anything it
+spawns) touches, and lets you <b>revert any of it</b>: one file, one session, or a whole
+<code>rm -rf</code>. It <b>alerts &amp; blocks</b> secret reads and dangerous commands the instant
+they happen. 100% local — no accounts, no network, nothing leaves your machine.
+</p>
 
-Everything is local. No accounts, no network, nothing leaves your machine.
-
-![CI](https://github.com/nirbendavid/revertly/actions/workflows/ci.yml/badge.svg)
-![platform](https://img.shields.io/badge/macOS-APFS-black?logo=apple)
-![works with](https://img.shields.io/badge/agents-Claude%20·%20Codex%20·%20Gemini%20·%20Aider%20·%20Cursor-bc8cff)
-![deps](https://img.shields.io/badge/dependencies-zero%20·%20pure%20python%20stdlib-3fb950)
-![tests](https://img.shields.io/badge/tests-191%20passing-58a6ff)
-![phase](https://img.shields.io/badge/phase%201-local%20·%20offline-3fb950)
+![CI](https://github.com/nirbenda/revertly/actions/workflows/ci.yml/badge.svg)
+![platform](https://img.shields.io/badge/macOS-APFS-0B0E14?logo=apple)
+![agents](https://img.shields.io/badge/agents-Claude·Codex·Gemini·Aider·Cursor-3DDC97)
+![deps](https://img.shields.io/badge/deps-zero·pure_stdlib-1FB6C4)
+![tests](https://img.shields.io/badge/tests-228_passing-3DDC97)
+![license](https://img.shields.io/badge/license-MIT-8fa8a0)
 
 </div>
 

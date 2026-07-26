@@ -2,8 +2,8 @@
   <style>
     .fg  { fill: #c9d1d9; }
     .dim { fill: #8b949e; }
-    .grn { fill: #3fb950; }
-    .red { fill: #f85149; }
+    .grn { fill: #3DDC97; }
+    .red { fill: #FF6B6B; }
     .yel { fill: #d29922; }
     .blu { fill: #58a6ff; }
     .pur { fill: #bc8cff; }
