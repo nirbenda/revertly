@@ -161,6 +161,9 @@
   .sec-row .detail { flex: 1; word-break: break-all; font-family: ui-monospace, Menlo, monospace; }
   .sec-row .sess { color: var(--accent); cursor: pointer; font-size: 11px; }
   .sec-row .sess:hover { text-decoration: underline; }
+  .sec-row.fresh { animation: secfresh 2.4s ease-out; }
+  @keyframes secfresh { 0% { background: rgba(90,169,230,.28); } 100% { background: transparent; } }
+  #sec-stamp { color: var(--ok); }
 </style>
 
 <header>
@@ -239,8 +242,8 @@
         <option value="alerts">security alerts only</option>
         <option value="all">everything (incl. housekeeping)</option>
       </select>
-      <button class="act" id="sec-refresh">Refresh</button>
       <span class="sub" id="sec-count"></span>
+      <span class="sub" id="sec-stamp" style="margin-left:auto">● live</span>
     </div>
     <div id="sec-feed"></div>
   </section>
@@ -977,13 +980,36 @@ function secLabel(tag) {
             "PAUSE": "PAUSED" })[tag] || tag;
 }
 var secData = [];
+var secSeenTop = null;   // signature of the newest record we've rendered
+function secTopSig(recs) { return recs.length ? (recs[0].t + "|" + recs[0].detail) : ""; }
 function loadSecurity() {
   getJSON("/api/incidents").then(function(res){
     secData = (res.body && res.body.records) || [];
+    secSeenTop = secTopSig(secData);
     renderSecurity();
+    stampSec();
   });
 }
-function renderSecurity() {
+function stampSec() {
+  document.getElementById("sec-stamp").textContent = "● live · " + new Date().toLocaleTimeString();
+}
+function pollSecurity() {
+  getJSON("/api/incidents").then(function(res){
+    var recs = (res.body && res.body.records) || [];
+    var newTop = secTopSig(recs);
+    if (recs.length !== secData.length || newTop !== secTopSig(secData)) {
+      var prevTop = secSeenTop;
+      secData = recs;
+      renderSecurity(prevTop);          // highlight anything newer than prevTop
+      secSeenTop = newTop;
+    }
+    stampSec();
+  });
+}
+setInterval(function(){
+  if (document.getElementById("tab-security").classList.contains("active")) pollSecurity();
+}, 2000);
+function renderSecurity(freshSince) {
   var q = document.getElementById("sec-filter").value;
   var cat = document.getElementById("sec-cat").value;
   var rows = secData.filter(function(r){
@@ -1016,9 +1042,19 @@ function renderSecurity() {
   var feed = document.getElementById("sec-feed"); feed.innerHTML = "";
   if (!secData.length) { feed.appendChild(el("div", "empty", "No security events yet — nothing suspicious has fired.")); return; }
   if (!rows.length) { feed.appendChild(el("div", "empty", "No events match.")); return; }
+  // rows newer than the last-seen top are "fresh" (arrived since last poll)
+  var freshSet = {};
+  if (freshSince) {
+    for (var i = 0; i < secData.length; i++) {
+      var sig = secData[i].t + "|" + secData[i].detail;
+      if (sig === freshSince) break;
+      freshSet[sig] = 1;
+    }
+  }
   var card = el("div", "card");
   rows.forEach(function(r){
-    var line = el("div", "sec-row " + secClass(r.tag));
+    var fresh = freshSet[r.t + "|" + r.detail] ? " fresh" : "";
+    var line = el("div", "sec-row " + secClass(r.tag) + fresh);
     line.appendChild(el("span", "when", r.t));
     line.appendChild(el("span", "kind", secLabel(r.tag)));
     line.appendChild(el("span", "detail", r.detail));
@@ -1036,9 +1072,8 @@ function openSessionTimeline(sid) {
   document.getElementById("tl-filter").value = sid;
   renderTimeline();
 }
-document.getElementById("sec-refresh").addEventListener("click", loadSecurity);
-document.getElementById("sec-filter").addEventListener("input", debounce(renderSecurity, 120));
-document.getElementById("sec-cat").addEventListener("change", renderSecurity);
+document.getElementById("sec-filter").addEventListener("input", debounce(function(){ renderSecurity(); }, 120));
+document.getElementById("sec-cat").addEventListener("change", function(){ renderSecurity(); });
 
 // ---- Live ----
 function renderLive(rows) {
