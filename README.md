@@ -10,8 +10,8 @@
 Run <b>Claude Code · Codex · Cursor</b> exactly as you always do. revertly sits underneath —
 snapshots your project <i>before</i> the agent starts, records every file it (or anything it
 spawns) touches, and lets you <b>revert any of it</b>: one file, one session, or a whole
-<code>rm -rf</code>. It <b>alerts &amp; blocks</b> secret reads and dangerous commands the instant
-they happen. No accounts, no network, nothing leaves your machine.
+<code>rm -rf</code>. It <b>alerts you to</b> secret reads and dangerous commands the instant
+they happen — and can <b>block</b> them when you opt in. No accounts, no network, nothing leaves your machine.
 </p>
 
 ![CI](https://github.com/nirbenda/revertly/actions/workflows/ci.yml/badge.svg)
@@ -76,6 +76,23 @@ speed, with no cage — and nothing it does can be permanent or invisible.
 | 🟠&nbsp; **RECORD** | 🟢&nbsp; **REVERT** | 🔴&nbsp; **GUARD** |
 |---|---|---|
 | Every create / edit / delete / rename lands in a **hash-chained journal** against a copy-on-write pre-image, taken before the agent starts. | Undo **one file, one session, or a whole `rm -rf`** — preview-first, rename-aware, and itself undoable. Nothing is ever lost. | Secret reads, `curl \| sh`, and persistence tricks (LaunchAgents, shell rc) trip a **live alert** the instant they fire. |
+
+## Your agent runs as you
+
+That's the part nobody says out loud. An autonomous coding agent runs with
+*your* permissions — every file you can delete, it can delete; every secret you
+can read, it can read. Most days that's the whole point. But it only takes a
+hallucinated "cleanup," or a poisoned README or web page that quietly turns a
+helpful agent hostile — **prompt injection isn't hypothetical** — and those same
+permissions rewrite a config, `rm -rf` a directory, read your `.env`, or drop a
+LaunchAgent that outlives the session. You find out days later. If ever.
+
+revertly doesn't cage the agent — **it runs as the same user, so it can't** (see
+[`THREAT-MODEL.md`](THREAT-MODEL.md)). It does the next thing that actually
+helps: it makes every one of those moves **loud while it happens** and
+**reversible after**. Not prevention — **evidence you can act on, and an undo
+button that already existed before the first token.** [Five ways that plays out,
+and exactly what you do](#when-it-saves-you) ↓
 
 ## How it works (the mental model)
 
@@ -190,6 +207,10 @@ covers for the failure (or sabotage) of the ones above it:
 On exit you get one summary line, and everything stays revertible.
 
 ## When it saves you
+
+Every row is a real way an agent goes wrong — corruption you'd notice too late, a
+deletion, a secret read, a persistence trick — paired with the exact move that
+makes it visible or undoes it. This is what *loud and reversible* buys you.
 
 <p align="center">
   <img src="docs/assets/tripwire.svg" width="880" alt="Animated demo: an injected session writes a LaunchAgent; tripwires fire a desktop notification mid-session; one revert command removes the footprint while keeping legitimate work.">
