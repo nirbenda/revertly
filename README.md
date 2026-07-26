@@ -32,6 +32,11 @@ git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
   <br><sub>↑ real output from a real session — only the paths were shortened.</sub>
 </p>
 
+<p align="center">
+  <img src="docs/assets/panel.png" width="880" alt="revertly control panel — a local dashboard with a sidebar (Timeline, Find, Diff, Revert, Security, Storage, Live) and a session's event stream: writes, a rename and a delete, with the rm command and a ~/.ssh read flagged in red.">
+  <br><sub>↑ …or point and click. <code>revertly ui</code> — a local control panel for the same thing.</sub>
+</p>
+
 <details>
 <summary><b>⚠️ Phase 1 — experimental.</b> Local, macOS (APFS) only, single-machine. <i>(read before you deploy)</i></summary>
 
@@ -159,14 +164,10 @@ REVERTLY_NO_SNAPSHOT=1 claude …  # skip the APFS snapshot layer for one run
 
 ### The control panel
 
-Prefer to point and click? `revertly ui` opens a local, offline panel — timeline,
-cross-session **Find**, diffs, one-click **revert**, a **live security feed**, and
-storage cleanup. Every action shows its equivalent CLI command; tabs are
-bookmarkable via `#hash`.
-
-<p align="center">
-  <img src="docs/assets/panel.png" width="900" alt="revertly control panel — the Timeline tab showing recorded sessions with armed / tripwire / revert badges, and one session's event stream (writes, a rename, a delete) with the rm command and the ~/.ssh read flagged in red.">
-</p>
+Prefer to point and click? `revertly ui` opens the local, offline control panel
+shown above — timeline, cross-session **Find**, diffs, one-click **revert**, a
+**live security feed**, and storage cleanup. Every action shows its equivalent
+CLI command; tabs are bookmarkable via `#hash`.
 
 ## How the net is built
 
