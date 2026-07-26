@@ -7,6 +7,13 @@
 <p><b>Records everything · Reverts anything · Runs 100% local.</b></p>
 
 <p>
+An AI coding agent runs with <b>your</b> permissions — so one prompt injection, one bad
+MCP tool, one hallucinated "cleanup" can turn it into a silent <code>rm -rf</code>, a
+leaked <code>.env</code>, or persistence that outlives the session. You can't reliably
+<i>prevent</i> that. <b>revertly makes it loud while it happens, and reversible after.</b>
+</p>
+
+<p>
 Run <b>Claude Code · Codex · Cursor</b> exactly as you always do. revertly sits underneath —
 snapshots your project <i>before</i> the agent starts, records every file it (or anything it
 spawns) touches, and lets you <b>revert any of it</b>: one file, one session, or a whole
