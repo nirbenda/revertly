@@ -2,39 +2,41 @@
 
 <img src="docs/assets/hero.svg" width="840" alt="revertly — a seatbelt for AI coding agents, not a cage">
 
-<p><b>Let the agent go full speed. Undo anything it does. Catch the sketchy stuff live.</b></p>
+<h3>Let the agent cook. Keep the undo button.</h3>
+
+<p><b>Records everything · Reverts anything · Runs 100% local.</b></p>
 
 <p>
-Run <b>Claude Code · Codex · Cursor</b> exactly as you always do — revertly sits underneath,
+Run <b>Claude Code · Codex · Cursor</b> exactly as you always do. revertly sits underneath —
 snapshots your project <i>before</i> the agent starts, records every file it (or anything it
 spawns) touches, and lets you <b>revert any of it</b>: one file, one session, or a whole
 <code>rm -rf</code>. It <b>alerts &amp; blocks</b> secret reads and dangerous commands the instant
-they happen. 100% local — no accounts, no network, nothing leaves your machine.
+they happen. No accounts, no network, nothing leaves your machine.
 </p>
 
 ![CI](https://github.com/nirbenda/revertly/actions/workflows/ci.yml/badge.svg)
-![platform](https://img.shields.io/badge/macOS-APFS-0B0E14?logo=apple)
-![agents](https://img.shields.io/badge/agents-Claude·Codex·Gemini·Aider·Cursor-3DDC97)
-![deps](https://img.shields.io/badge/deps-zero·pure_stdlib-1FB6C4)
-![tests](https://img.shields.io/badge/tests-228_passing-3DDC97)
-![license](https://img.shields.io/badge/license-MIT-8fa8a0)
+![platform](https://img.shields.io/badge/macOS-APFS-17130E?style=flat-square&logo=apple)
+![deps](https://img.shields.io/badge/deps-zero-33D69F?style=flat-square)
+![agents](https://img.shields.io/badge/agents-Claude_Codex_Gemini_Aider_Cursor-FF9F1C?style=flat-square)
+![tests](https://img.shields.io/badge/tests-228_passing-33D69F?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-A99C88?style=flat-square)
 
 </div>
 
-> ⚠️ **Phase 1 — experimental.** Local, **macOS (APFS) only**, single-machine.
-> It's a developer safety net that's **tamper-evident, not tamper-proof** (a
-> same-UID/hijacked agent can be *loud and logged*, not *stopped* — see
-> [`THREAT-MODEL.md`](THREAT-MODEL.md)). Not yet a managed/fleet security
-> control. Try it, break it, tell us — but don't deploy it as your only
-> guardrail.
-
-<br>
+```sh
+git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
+```
 
 <p align="center">
   <img src="docs/assets/demo.svg" width="880" alt="Animated demo: an agent session breaks the parser and deletes README.md; revertly diff shows exactly what changed; revertly revert restores everything.">
+  <br><sub>↑ real output from a real session — only the paths were shortened.</sub>
 </p>
 
-<p align="center"><sub>↑ real output from a real session — only the paths were shortened.</sub></p>
+> ⚠️ **Phase 1 — experimental.** Local, **macOS (APFS) only**, single-machine.
+> A developer safety net that's **tamper-evident, not tamper-proof** (a
+> same-UID/hijacked agent is made *loud and logged*, not *stopped* — see
+> [`THREAT-MODEL.md`](THREAT-MODEL.md)). Not yet a managed/fleet security control.
+> Try it, break it, tell us — but don't make it your only guardrail.
 
 ## Why
 
@@ -48,6 +50,15 @@ speed, with no cage — and nothing it does can be permanent or invisible.
 - **Invisibility — gone.** Sensitive paths are tripwired: touch `~/.ssh`, `.env`,
   your shell rc — you get a desktop notification *while it happens*, not a
   forensic surprise weeks later.
+
+|                                   | 🧱 Sandbox / container | 🟠 **revertly** | 🕳️ Nothing (just YOLO) |
+| --------------------------------- | :--------------------: | :-------------: | :---------------------: |
+| Agent runs at full speed          |           ❌            |       ✅        |           ✅            |
+| Undo a bad edit / `rm -rf`        |    partial (in-box)    |    ✅ any of it   |           ❌            |
+| Restore a single file, days later |           ❌            |       ✅        |           ❌            |
+| Alert on secret reads / persistence |          ❌            |    ✅ live       |           ❌            |
+| Tamper-evident record of the run  |           ❌            |       ✅        |           ❌            |
+| Setup cost                        |     high (rebuild env) |   one line     |          none           |
 
 ## How it works (the mental model)
 

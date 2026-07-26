@@ -1,58 +1,55 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 440" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 440" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, 'Space Grotesk', sans-serif">
   <defs>
     <linearGradient id="h-mark" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3DDC97"/>
-      <stop offset="1" stop-color="#1FB6C4"/>
+      <stop offset="0" stop-color="#FFB54C"/>
+      <stop offset="1" stop-color="#FF5C6A"/>
     </linearGradient>
-    <linearGradient id="h-word" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#EAFBF4"/>
-      <stop offset="1" stop-color="#B7F0DC"/>
-    </linearGradient>
-    <radialGradient id="h-glow" cx="50%" cy="26%" r="60%">
-      <stop offset="0" stop-color="#3DDC97" stop-opacity="0.20"/>
-      <stop offset="55%" stop-color="#1FB6C4" stop-opacity="0.05"/>
-      <stop offset="100%" stop-color="#0B0E14" stop-opacity="0"/>
+    <radialGradient id="h-glow" cx="50%" cy="24%" r="62%">
+      <stop offset="0" stop-color="#FF9F1C" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#FF5C6A" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#17130E" stop-opacity="0"/>
     </radialGradient>
     <pattern id="h-dots" width="26" height="26" patternUnits="userSpaceOnUse">
-      <circle cx="1.5" cy="1.5" r="1.5" fill="#1a2430"/>
+      <circle cx="1.5" cy="1.5" r="1.5" fill="#241c12"/>
     </pattern>
   </defs>
 
-  <rect x="2" y="2" width="1276" height="436" rx="24" fill="#0B0E14" stroke="#1b2530" stroke-width="1.5"/>
+  <rect x="2" y="2" width="1276" height="436" rx="24" fill="#17130E" stroke="#34291D" stroke-width="1.5"/>
   <rect x="2" y="2" width="1276" height="436" rx="24" fill="url(#h-dots)"/>
   <rect x="2" y="2" width="1276" height="436" rx="24" fill="url(#h-glow)"/>
 
   <!-- mark -->
   <g transform="translate(544,54) scale(0.62)">
     <rect x="20" y="20" width="200" height="200" rx="54" fill="url(#h-mark)"/>
-    <g fill="none" stroke="#0B0E14" stroke-width="22" stroke-linecap="round">
+    <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round">
       <path d="M77 104 A46 46 0 1 0 112 75"/>
     </g>
-    <polygon points="88,80 116,91 108,58" fill="#0B0E14"/>
+    <polygon points="88,80 116,91 108,58" fill="#17130E"/>
   </g>
 
-  <!-- wordmark -->
-  <text x="640" y="256" text-anchor="middle" font-size="88" font-weight="800"
-        letter-spacing="-2" fill="url(#h-word)">revertly</text>
+  <!-- wordmark: revert (eggshell) + ly (amber) -->
+  <text x="640" y="256" text-anchor="middle" font-size="88" font-weight="700" letter-spacing="-3">
+    <tspan fill="#F4ECDF">revert</tspan><tspan fill="#FF9F1C">ly</tspan>
+  </text>
 
   <!-- tagline -->
-  <text x="640" y="308" text-anchor="middle" font-size="25" font-weight="500" fill="#8fa8a0">
-    a seatbelt for AI coding agents — <tspan fill="#cfe9df" font-weight="600">not a cage</tspan>
+  <text x="640" y="308" text-anchor="middle" font-size="25" font-weight="500" fill="#A99C88">
+    a seatbelt for AI coding agents — <tspan fill="#F4ECDF" font-weight="600">not a cage</tspan>
   </text>
 
   <!-- capability chips -->
   <g font-size="14" font-weight="700" letter-spacing="1.5" text-anchor="middle">
     <g transform="translate(505,352)">
-      <rect x="-58" y="-19" width="116" height="34" rx="17" fill="#10201a" stroke="#25493b"/>
-      <text y="4" fill="#3DDC97">RECORD</text>
+      <rect x="-58" y="-19" width="116" height="34" rx="17" fill="#2A1E0A" stroke="#5a4322"/>
+      <text y="4" fill="#FF9F1C">RECORD</text>
     </g>
     <g transform="translate(640,352)">
-      <rect x="-56" y="-19" width="112" height="34" rx="17" fill="#10201a" stroke="#25493b"/>
-      <text y="4" fill="#3DDC97">REVERT</text>
+      <rect x="-56" y="-19" width="112" height="34" rx="17" fill="#12281E" stroke="#2c5a44"/>
+      <text y="4" fill="#33D69F">REVERT</text>
     </g>
     <g transform="translate(775,352)">
-      <rect x="-52" y="-19" width="104" height="34" rx="17" fill="#201014" stroke="#4a2530"/>
-      <text y="4" fill="#FF6B6B">GUARD</text>
+      <rect x="-52" y="-19" width="104" height="34" rx="17" fill="#2a1216" stroke="#5a2530"/>
+      <text y="4" fill="#FF5C6A">GUARD</text>
     </g>
   </g>
 </svg>
