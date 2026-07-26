@@ -217,9 +217,19 @@ def run_wrapped(cmd: List[str]) -> int:
         return _exec_unprotected(cmd, reason="internal error")
 
     print(f"revertly: armed session {sess.id} (snapshot+clone+watch active)", file=sys.stderr)
-    # Export the session dir so the agent's hooks (which run as its children and
-    # inherit the env) attribute READ/SUSPICIOUS findings to THIS session.
+    # Export the session dir so the agent's hooks/guard (children that inherit
+    # the env) attribute READ/SUSPICIOUS findings to THIS session.
     os.environ["REVERTLY_SESSION_DIR"] = paths.session_dir(sess.id)
+    # Activate the agnostic command guard: put intercepting shims first on the
+    # agent's PATH so dangerous commands (curl|sh, launchctl, nc, secret reads
+    # via cat, …) are seen/guarded regardless of which agent runs them.
+    if cfg.guard_mode != "off" and not os.environ.get("REVERTLY_GUARD_DISABLE"):
+        try:
+            from . import guard
+            guard.ensure_cmd_shims()
+            os.environ["PATH"] = paths.cmdbin_dir() + os.pathsep + os.environ.get("PATH", "")
+        except Exception:
+            pass   # guard is best-effort; never block arming
     exit_code = 0
     try:
         exit_code = subprocess.call(cmd)

@@ -59,6 +59,9 @@ class Config:
     max_disk_gb: float = 10.0
     on_arm_failure: str = "ask"          # ask | proceed | abort
     poll_interval: float = 0.5           # PollingWatcher cadence (seconds)
+    # agnostic command guard: alert (log only) | block (refuse dangerous
+    # commands with a message to the agent) | off (no interception)
+    guard_mode: str = "alert"
 
     # ---- glob helpers (operate on absolute, expanded paths) ----
 
@@ -237,6 +240,7 @@ def _apply(cfg: Config, section, key, val):
         ("tripwires", "on_read"): "tripwire_on_read",
         (None, "on_arm_failure"): "on_arm_failure",
         ("watch", "poll_interval"): "poll_interval",
+        ("guard", "mode"): "guard_mode",
     }
     attr = mapping.get((section, key))
     if attr:

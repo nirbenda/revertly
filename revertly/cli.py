@@ -647,6 +647,14 @@ def cmd_doctor(args) -> int:
         ok = False
     else:
         print(f"  tripwires: {len(cfg.tripwire_paths)} sensitive patterns armed")
+    # command guard + hook layer
+    from . import guard, hooks
+    guarded = [c for c in guard.GUARDED if guard.resolve_real(c)]
+    print(f"  command guard: {cfg.guard_mode} mode, "
+          f"{len(guarded)} dangerous command(s) intercepted (agnostic)")
+    print(f"  Claude Code hook: "
+          f"{'installed' if hooks.is_claude_hook_installed() else 'not installed'} "
+          f"(secret reads & suspicious tool calls)")
     # journal integrity across all sessions
     sids = paths.list_session_ids()
     tampered = [s for s in sids if not Journal.verify(paths.journal_path(s))[0]]

@@ -165,28 +165,33 @@ def read_session_findings(session_dir: str) -> List[dict]:
     return out
 
 
+def record_findings(findings: List[Finding]) -> None:
+    """Log findings to the incident log, the active session's hooks.jsonl, and
+    a desktop notification. Shared by the hook AND the agnostic command guard."""
+    if not findings:
+        return
+    import sys
+    sdir = _session_dir()
+    sid = os.path.basename(sdir.rstrip(os.sep)) if sdir else "-"
+    for f in findings:
+        paths.append_incident(f.kind, f.detail, session_id=sid)
+        print(f"revertly ⚠ {f.kind}: {f.detail}", file=sys.stderr)
+        _desktop_notify(f.kind, f.detail)
+        if sdir:
+            try:
+                with open(os.path.join(sdir, "hooks.jsonl"), "a") as h:
+                    h.write(json.dumps(f.as_dict()) + "\n")
+            except OSError:
+                pass
+
+
 def handle(payload: dict) -> int:
     """Process one hook payload. Logs findings, notifies, returns an exit code.
     ALWAYS 0 in Phase 1 (alert-only — never block the agent). Fail-open."""
     try:
         tool_name = payload.get("tool_name") or payload.get("tool") or ""
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
-        findings = classify(tool_name, tool_input)
-        if not findings:
-            return 0
-        sdir = _session_dir()
-        sid = os.path.basename(sdir.rstrip(os.sep)) if sdir else "-"
-        import sys
-        for f in findings:
-            paths.append_incident(f.kind, f.detail, session_id=sid)
-            print(f"revertly ⚠ {f.kind}: {f.detail}", file=sys.stderr)
-            _desktop_notify(f.kind, f.detail)
-            if sdir:
-                try:
-                    with open(os.path.join(sdir, "hooks.jsonl"), "a") as h:
-                        h.write(json.dumps(f.as_dict()) + "\n")
-                except OSError:
-                    pass
+        record_findings(classify(tool_name, tool_input))
     except Exception:
         pass
     return 0

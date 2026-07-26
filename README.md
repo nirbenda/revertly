@@ -160,18 +160,27 @@ On exit you get one summary line, and everything stays revertible.
 | Agent runs `curl … \| bash`, sets a LaunchAgent, or `rm -rf ~/.revertly` | The hook flags it as `SUSPICIOUS` / `SELF_TAMPER` before it runs; every session ends with a security summary (`N sensitive reads, M suspicious commands`) |
 | You regret a revert | Reverts are sessions too: `revertly revert <revert-id>` — **nothing is ever lost** |
 
-> **Scope, stated plainly.** Two layers, two coverage areas:
+> **Scope, stated plainly.** Three layers, from most to least agnostic:
 > - **Filesystem watcher** — catches every create/modify/delete/rename in the
 >   project (by *anything* — the agent, a shell command, or a script it spawns).
 >   Revert restores from the pre-image **clone of the project dir**; files
 >   *outside* it are alerted but not content-reverted (that's the APFS snapshot's
->   job — a manual Recovery restore).
-> - **Hook layer** (`revertly hook`, installed with the `claude` binding) — sees
->   the agent's **tool calls**, so it catches **reads** of secrets and
->   **suspicious commands** that leave no file trace. Honest ceiling: it sees the
->   agent's own tool calls; a **binary or subprocess** the agent spawns that
->   reads a key or opens a socket is invisible until the Endpoint-Security build
->   (Tier 3). It's **alert-only** in Phase 1 — it never blocks the agent.
+>   job — a manual Recovery restore). Fully **agnostic** — no per-agent wiring.
+> - **Command guard** — revertly prepends intercepting shims for dangerous
+>   commands (`curl`, `bash`, `nc`, `launchctl`, `crontab`, …) to the agent's
+>   `PATH`, so a `curl … | bash`, a `launchctl load`, or a `cat ~/.ssh/id_rsa`
+>   is seen — and, in `block` mode, **refused with a message the agent reads and
+>   corrects on** — no matter *which* agent runs it. Fully **agnostic**. Set
+>   `[guard] mode = "block"` in the config to enforce (default is `alert`).
+> - **Claude Code hook** (optional, installed with the `claude` binding) — sees
+>   the agent's structured **tool calls** for higher-fidelity read/command
+>   detection where the harness supports hooks.
+>
+> **Honest ceiling:** the guard and hook are *userspace* — a determined agent
+> evades them by calling `/usr/bin/curl` directly or doing the read/network
+> in-process (Python `open()`/`urllib`). They are tamper-**raising**, not a
+> boundary. The real boundary is the kernel: an opt-in `sandbox-exec` profile
+> and, ultimately, the Endpoint-Security build (Tier 3).
 
 ## Commands
 

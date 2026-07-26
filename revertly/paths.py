@@ -34,6 +34,13 @@ def bin_dir() -> str:
     return os.path.join(revertly_home(), "bin")
 
 
+def cmdbin_dir() -> str:
+    # intercepting shims for dangerous commands (curl, bash, launchctl, …),
+    # prepended to the wrapped agent's PATH so revertly sees/guards them
+    # regardless of which agent runs them.
+    return os.path.join(revertly_home(), "cmdbin")
+
+
 def config_path() -> str:
     return os.path.join(revertly_home(), "config.toml")
 
