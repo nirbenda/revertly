@@ -55,6 +55,14 @@ _SUSPICIOUS = [
     (r">>?\s*~?/?(\.zshrc|\.bashrc|\.zprofile|\.bash_profile|\.profile)\b", "write to a shell rc file"),
     (r"\beval\b\s*[\"'`$]", "eval of a dynamic string"),
     (r"\bosascript\b.*-e\b", "osascript (AppleScript execution)"),
+    # mass destruction: rm -r aimed at /, /*, ~ or $HOME itself (not subpaths)
+    (r"\brm\s+(?=(?:-[a-zA-Z]+\s+)*-[a-zA-Z]*[rR])(?:-[a-zA-Z]+\s+)+(?:--\s+)?"
+     r"[\"']?(?:/\*?|~/?|\$HOME/?)[\"']?(?=\s|;|&|\||$)",
+     "mass deletion of / or the home directory"),
+    (r"\bfind\s+[\"']?(?:/|~|\$HOME)[\"']?\s[^\n]*-delete\b",
+     "mass deletion via find -delete"),
+    (r"\bdiskutil\b[^\n]*\b(erase|reformat|zero)", "erase/reformat a disk (diskutil)"),
+    (r"\bdd\b[^\n]*\bof=/dev/", "raw write to a device (dd)"),
 ]
 
 # commands that specifically target revertly itself

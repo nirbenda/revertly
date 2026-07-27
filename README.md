@@ -25,7 +25,7 @@ they happen — and can <b>block</b> them when you opt in. No accounts, no netwo
 ![platform](https://img.shields.io/badge/macOS-APFS-17130E?style=flat-square&logo=apple)
 ![deps](https://img.shields.io/badge/deps-zero-33D69F?style=flat-square)
 ![agents](https://img.shields.io/badge/agents-Claude_Codex_Gemini_Aider_Cursor-FF9F1C?style=flat-square)
-![tests](https://img.shields.io/badge/tests-230_passing-33D69F?style=flat-square)
+![tests](https://img.shields.io/badge/tests-233_passing-33D69F?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-A99C88?style=flat-square)
 
 </div>
@@ -442,6 +442,18 @@ only when the agent overwrites or deletes files. Auto-retention (default: 30
 days / disk cap) prunes old sessions, `revertly status` shows usage, and the
 UI's Storage tab clears history at a safe point you pick.
 
+**What if the agent tries to wipe the whole machine?**
+The OS survives regardless — macOS seals the system volume (SIP), so not even
+root can `rm -rf` it; what's at risk is your *data*. revertly's answer, in
+order: shell-level wipes (`rm -rf ~`, `rm -rf /`, `diskutil erase…`, `dd` to a
+raw disk) classify as `SUSPICIOUS` — **refused in opt-in `block` mode**, alerted
+otherwise; tripwires and `SELF_TAMPER` fire notifications *while it happens*;
+and the **root-protected APFS snapshot from session start survives a same-user
+wipe** — every byte is recoverable from Recovery Mode. Honest limits: the
+snapshot window is ~24h (it's a session backstop, **not a backup** — keep Time
+Machine), and a spawned binary calling `/bin/rm` directly evades the userspace
+guard (kernel-level enforcement is Phase 2).
+
 **What if the agent deletes revertly itself?**
 It can — same user — but not silently: sentinel watchers fire a `SELF_TAMPER`
 alert, the journal is hash-chained and sealed immutable, and the APFS volume
@@ -474,7 +486,7 @@ directory under `~/.revertly` on your disk.
 - [x] One-command revert: a file, a session, a glob — preview-first, itself undoable
 - [x] Tripwires + `SELF_TAMPER` + harness-agnostic command guard (+ Claude Code hook)
 - [x] Multi-agent detect & bind, local control-panel UI, storage retention
-- [x] 230 tests, zero dependencies, pure stdlib
+- [x] 233 tests, zero dependencies, pure stdlib
 
 **Phase 2 — next:**
 - [ ] Wire the APFS snapshot into `revertly revert` (out-of-project restores)
@@ -506,7 +518,7 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-230 tests (including an end-to-end lifecycle test, a security/tamper suite,
+233 tests (including an end-to-end lifecycle test, a security/tamper suite,
 move-chain/data-loss regressions, and the retention planner) across model,
 config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
 session, cli, ui, and hardening. TDD throughout.

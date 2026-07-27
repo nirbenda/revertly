@@ -38,6 +38,24 @@ class TestClassify(unittest.TestCase):
         self.assertIn("SELF_TAMPER", self.kinds("Bash", {"command": "rm -rf ~/.revertly"}))
         self.assertIn("SELF_TAMPER", self.kinds("Bash", {"command": "revertly pause"}))
 
+    def test_mass_deletion_is_suspicious(self):
+        # a wipe aimed at / or the home dir itself must classify SUSPICIOUS
+        # (so opt-in block mode can refuse it). Pure string classification.
+        for cmd in ["rm -rf ~", "rm -rf /", "sudo rm -rf /*",
+                    "rm -rf $HOME", "rm -r -f ~", "rm -fR ~/"]:
+            self.assertIn("SUSPICIOUS", self.kinds("Bash", {"command": cmd}), cmd)
+
+    def test_scoped_rm_is_not_flagged(self):
+        # ordinary project-scoped deletes must stay silent — no alert fatigue
+        for cmd in ["rm -rf ./build", "rm -rf node_modules",
+                    "rm -rf ~/prj/tmp", "rm -rf /tmp/scratch", "rm -f file.txt"]:
+            self.assertEqual(self.kinds("Bash", {"command": cmd}), [], cmd)
+
+    def test_disk_erase_is_suspicious(self):
+        self.assertIn("SUSPICIOUS", self.kinds("Bash", {"command": "diskutil eraseDisk APFS X disk2"}))
+        self.assertIn("SUSPICIOUS", self.kinds("Bash", {"command": "dd if=/dev/zero of=/dev/disk2"}))
+        self.assertIn("SUSPICIOUS", self.kinds("Bash", {"command": "find ~ -name '*.bak' -delete"}))
+
     def test_benign_command_no_findings(self):
         self.assertEqual(self.kinds("Bash", {"command": "npm test && ls -la"}), [])
 
