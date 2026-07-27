@@ -28,16 +28,31 @@ class ArmError(RuntimeError):
 
 # Directories whose deletion is normal, high-volume, and regeneratable — we
 # still journal (and can revert) them, but they must NOT count toward a
-# "runaway deletion" alarm, or `rm -rf dist` would cry wolf every build.
+# "runaway deletion" alarm, or `rm -rf dist` would cry wolf every build. Kept
+# to unambiguous build/cache dir names — generic ones like tmp/bin/out were
+# dropped because they cause false *negatives* (e.g. a whole project checked
+# out under /tmp would never trip). We match on the path RELATIVE to the
+# project root (see _is_regeneratable) so an ancestor named `build` above the
+# project can't silence detection either.
 _REGENERATABLE_SEGMENTS = {
-    "build", "dist", "target", "out", "bin", "obj", ".next", ".nuxt",
-    "coverage", ".cache", ".parcel-cache", ".turbo", "tmp", ".tmp",
-    ".pytest_cache", ".mypy_cache", ".gradle", "__snapshots__",
+    "build", "dist", "target", ".next", ".nuxt", "coverage", ".cache",
+    ".parcel-cache", ".turbo", ".pytest_cache", ".mypy_cache", ".gradle",
+    "__snapshots__",
 }
 
 
-def _is_regeneratable(path: str) -> bool:
-    parts = os.path.normpath(path or "").split(os.sep)
+def _is_regeneratable(path: str, root: str = None) -> bool:
+    """True if `path` sits inside a regeneratable build/cache dir *within the
+    project*. `root` (the session cwd) is stripped first so the project's own
+    location — e.g. /tmp/build/myproj — never masks a real deletion."""
+    p = os.path.normpath(path or "")
+    if root:
+        root = os.path.normpath(root)
+        if p == root:
+            return False
+        if p.startswith(root + os.sep):
+            p = p[len(root) + 1:]           # project-relative remainder only
+    parts = p.split(os.sep)
     return any(seg in _REGENERATABLE_SEGMENTS for seg in parts)
 
 
@@ -51,16 +66,17 @@ class _BurstDetector:
     (that needs a kernel boundary); it exists so the damage is caught fast and
     made undoable in one shot, since every deleted file is in the pre-image."""
 
-    def __init__(self, cfg, on_trip):
+    def __init__(self, cfg, on_trip, cwd: Optional[str] = None):
         self.enabled = getattr(cfg, "delete_burst", "alert") != "off"
         self.threshold = max(2, int(getattr(cfg, "delete_burst_threshold", 25)))
         self.window = max(0.1, float(getattr(cfg, "delete_burst_window", 3.0)))
+        self.cwd = cwd
         self._on_trip = on_trip
         self._times = collections.deque()
         self._last_trip = 0.0
 
     def observe_delete(self, path: str, now: Optional[float] = None) -> None:
-        if not self.enabled or _is_regeneratable(path):
+        if not self.enabled or _is_regeneratable(path, self.cwd):
             return
         now = time.time() if now is None else now
         self._times.append(now)
@@ -92,7 +108,7 @@ class Session:
         self._watchers = []              # active watchers (1 project + N tripwire roots)
         self._journal: Optional[Journal] = None
         self._tripwire = TripwireEngine(self.cfg)
-        self._burst = _BurstDetector(self.cfg, self._on_delete_burst)
+        self._burst = _BurstDetector(self.cfg, self._on_delete_burst, cwd=self.cwd)
         self.meta: Optional[SessionMeta] = None
 
     # ─────────────────────── arm ───────────────────────

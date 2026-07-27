@@ -72,6 +72,19 @@ class TestBurstDetector(unittest.TestCase):
         self.assertFalse(_is_regeneratable("/proj/src/app.py"))
         self.assertFalse(_is_regeneratable("/proj/README.md"))
 
+    def test_project_under_regeneratable_named_root_still_counts(self):
+        # regression: a project checked out under /tmp or a dir literally named
+        # `build` must NOT have detection silenced — only segments *inside* the
+        # project count. (This is why Linux CI failed: temp dirs live in /tmp.)
+        root = "/tmp/build/myproj"
+        self.assertFalse(_is_regeneratable(root + "/src/app.py", root))
+        self.assertTrue(_is_regeneratable(root + "/dist/app.js", root))  # inside project
+        d = self._det(threshold=3, window=100)
+        d.cwd = root
+        for i in range(3):
+            d.observe_delete(f"{root}/src/f{i}.py", now=100 + i)
+        self.assertEqual(len(self.trips), 1)
+
 
 class _HomeCase(unittest.TestCase):
     def setUp(self):
