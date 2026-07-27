@@ -69,6 +69,12 @@ speed, with no cage — and nothing it does can be permanent or invisible.
   your shell rc — you get a desktop notification *while it happens*, not a
   forensic surprise weeks later.
 
+> **"But I already have git."** Git saves what *you* deliberately commit.
+> revertly saves you from what the *agent* does **between** commits — to
+> untracked and `.gitignore`d files, before you staged anything, and outside the
+> repo entirely — plus it *alerts* on secret reads and dangerous commands, which
+> git never does. They're complementary: use both. ([more in the FAQ ↓](#faq))
+
 |                                   | 🧱 Sandbox / container | 🟠 **revertly** | 🕳️ Nothing (just YOLO) |
 | --------------------------------- | :--------------------: | :-------------: | :---------------------: |
 | Agent runs at full speed          |           ❌            |       ✅        |           ✅            |
@@ -434,11 +440,27 @@ takes >1s. While the agent runs, the watcher polls in the background and the
 guard shims `exec` straight into the real binaries — there's nothing in the
 file-I/O path.
 
-**Doesn't git already do this?**
-Git protects what you *commit*. revertly records everything **between** commits —
-untracked files, `.env`, the file the agent deleted before you ever staged it —
-with zero ceremony, and its diffs/restores don't touch your git state at all
-(no stash, no reflog spelunking, no commits made on your behalf).
+**I already use git — why do I need this?**
+Because git protects what *you deliberately commit*, and an AI agent's damage
+happens everywhere git isn't looking:
+
+- **Between commits.** The agent edits, runs, and deletes for an hour before you
+  next commit. Git only knows your last commit; revertly has a pre-image from
+  *before the session* and every change since.
+- **Untracked & ignored files.** `.env`, local configs, generated data, anything
+  in `.gitignore` — git deliberately ignores them; revertly records them.
+- **Outside the repo.** `~/.ssh`, `~/.zshrc`, a `LaunchAgent`, files in *another*
+  project — git has no idea. revertly tripwires them and can revert in-project
+  footprint.
+- **It requires discipline the agent won't have.** Git only saves you if *you*
+  committed at the right moment; a hallucinated `rm -rf` doesn't `git commit`
+  first. revertly arms automatically, every run.
+- **It's version control, not a monitor.** Git never tells you the agent *read*
+  `~/.ssh/id_rsa` or piped `curl | sh`. revertly alerts on that live.
+
+And it **doesn't touch your git state** — no stray commits, no stash, no reflog
+spelunking. In one line: **git is for the history *you* intend; revertly is for
+the damage the *agent* didn't.** Use both.
 
 **How much disk does it use?**
 Almost none at first: clones share blocks with the originals. Bytes become real
