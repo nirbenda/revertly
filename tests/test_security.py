@@ -1,8 +1,13 @@
 """Security hardening tests: tamper-detection, immutability, incident log,
 config-weakening detection."""
 import os
+import sys
 import tempfile
 import unittest
+
+_DARWIN_ONLY = unittest.skipUnless(
+    sys.platform == "darwin",
+    "user-immutable flags (chflags UF_IMMUTABLE) are macOS-only in Phase 1")
 
 from revertly import paths
 from revertly.config import Config
@@ -43,6 +48,7 @@ class SecBase(unittest.TestCase):
 
 
 class TestImmutability(SecBase):
+    @_DARWIN_ONLY
     def test_journal_immutable_after_seal(self):
         s = self._run_session()
         jp = paths.journal_path(s.id)
@@ -50,10 +56,13 @@ class TestImmutability(SecBase):
                         "sealed journal should be user-immutable")
 
     def test_no_harden_env_disables_immutability(self):
+        # cross-platform: with hardening off the journal is never immutable
+        # (and on Linux it's never immutable regardless — chflags is a no-op).
         os.environ["REVERTLY_NO_HARDEN"] = "1"
         s = self._run_session()
         self.assertFalse(paths.is_immutable(paths.journal_path(s.id)))
 
+    @_DARWIN_ONLY
     def test_immutable_blocks_naive_overwrite(self):
         s = self._run_session()
         jp = paths.journal_path(s.id)
@@ -61,6 +70,7 @@ class TestImmutability(SecBase):
             with open(jp, "w") as f:      # truncate should be denied by uchg
                 f.write("x")
 
+    @_DARWIN_ONLY
     def test_rmtree_force_removes_immutable(self):
         s = self._run_session()
         sdir = paths.session_dir(s.id)

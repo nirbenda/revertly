@@ -133,19 +133,8 @@ def classify(tool_name: str, tool_input: dict, cfg: Config = None) -> List[Findi
 # ─────────────────────────── handling (I/O) ───────────────────────────
 
 def _desktop_notify(title: str, body: str) -> None:
-    if os.environ.get("REVERTLY_NO_NOTIFY"):
-        return
-    try:
-        import shutil
-        import subprocess
-        if shutil.which("osascript"):
-            safe = body.replace('"', "'")[:200]
-            subprocess.Popen(
-                ["osascript", "-e",
-                 f'display notification "{safe}" with title "revertly: {title}"'],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+    from . import notify   # macOS (osascript) + Linux (notify-send)
+    notify.desktop(title, body)
 
 
 def _session_dir() -> str:

@@ -1,9 +1,13 @@
-"""Cloner interface + a real APFS clonefile backend and a Fake.
+"""Cloner interface + a real copy-on-write backend and a Fake.
 
-A Cloner copies files/trees. On APFS, `cp -c` requests a copy-on-write
-clonefile (near-instant, space-efficient); on non-APFS it falls back to a
-regular copy. Bytes must be identical either way. The Fake performs real
-shutil copies so downstream code sees real files, while recording calls.
+A Cloner copies files/trees, using the platform's copy-on-write path when it
+exists so the pre-image is near-instant and space-efficient:
+  * macOS/APFS  -> `cp -c` (clonefile)
+  * Linux       -> `cp --reflink=auto` (reflink on Btrfs/XFS/bcachefs, plain
+                   copy elsewhere — always succeeds, CoW where the FS allows)
+Bytes must be identical either way; every path falls back to a plain copy and
+finally a stdlib copy. The Fake performs real shutil copies so downstream code
+sees real files, while recording calls.
 
 Python 3.9, stdlib only.
 """
@@ -32,15 +36,28 @@ class Cloner(abc.ABC):
 
 
 class ClonefileCloner(Cloner):
-    """Real backend using `cp -c` (APFS clonefile) with a plain-copy fallback."""
+    """Real backend using the platform's copy-on-write copy (APFS clonefile on
+    macOS, reflink on Linux) with a plain-copy fallback."""
+
+    @staticmethod
+    def _cow_tree_argv(src: str, dst: str) -> List[str]:
+        if sys.platform == "darwin":
+            return ["cp", "-Rc", src, dst]                 # APFS clonefile
+        return ["cp", "-R", "--reflink=auto", src, dst]    # GNU cp reflink
+
+    @staticmethod
+    def _cow_file_argv(src: str, dst: str) -> List[str]:
+        if sys.platform == "darwin":
+            return ["cp", "-c", src, dst]
+        return ["cp", "--reflink=auto", src, dst]
 
     def clone_tree(self, src: str, dst: str) -> None:
-        # -R recurse, -c request clonefile. Fall back to -R if clonefile fails
-        # (e.g. non-APFS volume). Each fallback must start from a CLEAN dst:
-        # a partial `cp -Rc` left behind makes the retry copy src INTO it
-        # (BSD cp nests as dst/<srcname>/…) and then copytree raises
-        # FileExistsError — corrupting the pre-image. Clear dst between tries.
-        if self._run(["cp", "-Rc", src, dst]):
+        # Try the CoW copy first. Fall back to a plain -R copy if it fails
+        # (old cp without --reflink, or a filesystem that rejects it). Each
+        # fallback must start from a CLEAN dst: a partial `cp -R` left behind
+        # makes the retry copy src INTO it (cp nests as dst/<srcname>/…) and
+        # then copytree raises FileExistsError — corrupting the pre-image.
+        if self._run(self._cow_tree_argv(src, dst)):
             return
         self._clear(dst)
         if self._run(["cp", "-R", src, dst]):
@@ -60,12 +77,14 @@ class ClonefileCloner(Cloner):
                     pass
 
     def clone_file(self, src: str, dst: str) -> None:
-        if not self._run(["cp", "-c", src, dst]):
+        if not self._run(self._cow_file_argv(src, dst)):
             if not self._run(["cp", src, dst]):
                 shutil.copy2(src, dst)
 
     def is_cow(self) -> bool:
-        # Best effort: APFS is the default on modern macOS.
+        # Honest "clones are ~free" claim: guaranteed only on APFS. On Linux
+        # `--reflink=auto` MAY be CoW (Btrfs/XFS) or a full copy (ext4); we
+        # don't promise cheap there, so callers warn about clone cost.
         return sys.platform == "darwin"
 
     @staticmethod

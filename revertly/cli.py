@@ -675,10 +675,21 @@ def cmd_doctor(args) -> int:
                 print(f"  ⚠ {cmd:14} shim NOT first in PATH ({cmd} → {which}) — bypassed")
                 ok = False
     # snapshot capability
+    import sys as _sys
     from .snapshot import TmutilSnapshotter
+    from .clone import ClonefileCloner
     can = TmutilSnapshotter().can_snapshot()
-    print(f"APFS snapshots available (tmutil): {can}")
-    ok = ok and can
+    if _sys.platform == "darwin":
+        print(f"APFS snapshots available (tmutil): {can}")
+        ok = ok and can
+    else:
+        # Linux/other: the volume-snapshot layer is macOS-only. Record + revert
+        # still work; only the out-of-project disaster backstop is unavailable.
+        print("volume snapshots: unavailable on this platform "
+              "(macOS/APFS only) — record + revert work; out-of-project "
+              "disaster recovery does not")
+    cow = ClonefileCloner().is_cow()
+    print(f"copy-on-write clones: {'yes (cheap pre-images)' if cow else 'no — pre-images are full copies on this filesystem'}")
     # watcher import
     try:
         from .watch import PollingWatcher  # noqa
@@ -920,7 +931,10 @@ renames, and lets you undo any of it — one file, one session, or a whole
 sensitive (SSH keys, .env, shell config, LaunchAgents).
 
 Everything is local — no accounts, no network, nothing leaves your machine.
-Today: macOS (APFS) + Claude Code, out of the box.
+Platforms: macOS (APFS) — full support incl. volume snapshots; Linux
+(experimental) — record / revert / guard / undo work, reflink clones on
+Btrfs/XFS, no volume-snapshot layer yet. Claude Code out of the box; Codex,
+Cursor, and any other CLI agent via `revertly bind`.
 """
 
 _EPILOG = """\

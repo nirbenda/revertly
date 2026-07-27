@@ -22,10 +22,10 @@ they happen — and can <b>block</b> them when you opt in. No accounts, no netwo
 </p>
 
 ![CI](https://github.com/nirbenda/revertly/actions/workflows/ci.yml/badge.svg)
-![platform](https://img.shields.io/badge/macOS-APFS-17130E?style=flat-square&logo=apple)
+![platform](https://img.shields.io/badge/platform-macOS_·_Linux_(exp)-17130E?style=flat-square)
 ![deps](https://img.shields.io/badge/deps-zero-33D69F?style=flat-square)
 ![agents](https://img.shields.io/badge/agents-Claude_Codex_Gemini_Aider_Cursor-FF9F1C?style=flat-square)
-![tests](https://img.shields.io/badge/tests-251_passing-33D69F?style=flat-square)
+![tests](https://img.shields.io/badge/tests-258_passing-33D69F?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-A99C88?style=flat-square)
 
 </div>
@@ -45,7 +45,7 @@ git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
 </p>
 
 <details>
-<summary><b>⚠️ Phase 1 — experimental.</b> Local, macOS (APFS) only, single-machine. <i>(read before you deploy)</i></summary>
+<summary><b>⚠️ Phase 1 — experimental.</b> Local, single-machine — macOS (APFS) full, Linux experimental. <i>(read before you deploy)</i></summary>
 
 <br>
 
@@ -146,10 +146,12 @@ only inside a tool — it's all plain files under `~/.revertly`.
 
 ## Requirements & compatibility
 
-- **OS:** macOS with an **APFS** volume (the default on modern Macs). The
-  copy-on-write clones and volume snapshots are APFS features. Linux/other
-  filesystems are on the roadmap (the watcher and revert engine are portable;
-  the clone/snapshot layer is what's macOS-specific today).
+- **OS:** **macOS** with an **APFS** volume (the default on modern Macs) — full
+  support, including copy-on-write clones and volume snapshots. **Linux is
+  experimental:** record / revert / guard / `undo` all work, and clones use
+  reflink CoW on Btrfs/XFS (a plain copy elsewhere); the volume-snapshot layer
+  (the out-of-project disaster backstop) and journal immutability are macOS-only
+  for now. `revertly doctor` reports exactly which capabilities your machine has.
 - **Runtime:** `python3` — already on a stock Mac. **Zero third-party dependencies.**
 - **Agents:** `install` **detects the agent CLIs on your PATH and binds the
   ones you choose** — **Claude Code, Codex, Gemini, Aider, Cursor CLI** and more
@@ -492,13 +494,13 @@ directory under `~/.revertly` on your disk.
 - [x] Runaway-deletion detector + one-shot `revertly undo` (and a UI recovery banner)
 - [x] Tripwires + `SELF_TAMPER` + harness-agnostic command guard (+ Claude Code hook)
 - [x] Multi-agent detect & bind, local control-panel UI, storage retention
-- [x] 251 tests, zero dependencies, pure stdlib
+- [x] 258 tests, zero dependencies, pure stdlib
 
 **Phase 2 — next:**
 - [ ] Wire the APFS snapshot into `revertly revert` (out-of-project restores)
 - [ ] FSEvents watcher backend (sub-poll fidelity, big-repo scaling)
 - [ ] Ambient watch mode for GUI/IDE agents (Cursor app, Copilot)
-- [ ] Linux support (the watcher and revert engine are already portable)
+- [~] Linux — **experimental today** (record/revert/guard/undo + reflink clones); still to come: a volume-snapshot backend (Btrfs/ZFS) and journal immutability (`chattr`)
 - [ ] Kernel-level enforcement: opt-in `sandbox-exec` profile → Endpoint Security build
 - [ ] Fleet console & telemetry for teams — the commercial layer
 
@@ -524,7 +526,7 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-251 tests (including an end-to-end lifecycle test, a security/tamper suite,
+258 tests (including an end-to-end lifecycle test, a security/tamper suite,
 move-chain/data-loss regressions, and the retention planner) across model,
 config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
 session, cli, ui, and hardening. TDD throughout.

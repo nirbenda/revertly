@@ -325,20 +325,9 @@ class Session:
                               session_id=self.id)
 
     def _desktop_notify(self, title, body):
-        # best-effort; never block or raise. macOS only.
-        if os.environ.get("REVERTLY_NO_NOTIFY"):
-            return
-        try:
-            import shutil as _sh
-            import subprocess
-            if _sh.which("osascript"):
-                safe = body.replace('"', "'")[:200]
-                subprocess.Popen(
-                    ["osascript", "-e",
-                     f'display notification "{safe}" with title "revertly: {title}"'],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception:
-            pass
+        # best-effort; never block or raise. macOS (osascript) + Linux (notify-send).
+        from . import notify
+        notify.desktop(title, body)
 
     # ─────────────────────── seal ───────────────────────
 

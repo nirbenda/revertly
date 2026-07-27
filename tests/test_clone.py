@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from revertly.clone import Cloner, FakeCloner, ClonefileCloner
 
@@ -83,6 +84,26 @@ class TestClonefileCloner(unittest.TestCase):
             c.clone_tree(src, dst)
             self.assertEqual(_read(os.path.join(dst, "x.txt")), "one")
             self.assertEqual(_read(os.path.join(dst, "sub", "y.txt")), "two")
+
+
+class TestPlatformCowArgv(unittest.TestCase):
+    """The CoW copy command is platform-specific (APFS clonefile vs Linux
+    reflink). Verify both regardless of the host we run on."""
+
+    def test_darwin_uses_clonefile(self):
+        with mock.patch("revertly.clone.sys.platform", "darwin"):
+            self.assertEqual(ClonefileCloner._cow_tree_argv("s", "d"),
+                             ["cp", "-Rc", "s", "d"])
+            self.assertEqual(ClonefileCloner._cow_file_argv("s", "d"),
+                             ["cp", "-c", "s", "d"])
+
+    def test_linux_uses_reflink(self):
+        with mock.patch("revertly.clone.sys.platform", "linux"):
+            self.assertEqual(ClonefileCloner._cow_tree_argv("s", "d"),
+                             ["cp", "-R", "--reflink=auto", "s", "d"])
+            self.assertEqual(ClonefileCloner._cow_file_argv("s", "d"),
+                             ["cp", "--reflink=auto", "s", "d"])
+            self.assertFalse(ClonefileCloner().is_cow())  # no cheap-CoW promise
 
 
 if __name__ == "__main__":

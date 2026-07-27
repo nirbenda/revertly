@@ -7,11 +7,12 @@ on:
 
 jobs:
   test:
-    name: verify (macOS, py${{ matrix.python }})
-    runs-on: macos-latest
+    name: verify (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [macos-latest, ubuntu-latest]
         python: ["3.9", "3.11", "3.12"]
     env:
       REVERTLY_NO_NOTIFY: "1"   # no desktop popups on the runner
