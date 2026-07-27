@@ -25,6 +25,12 @@ def sessions_root() -> str:
     return os.path.join(revertly_home(), "sessions")
 
 
+def bursts_dir() -> str:
+    # one JSON file per detected runaway-deletion burst, so each can carry its
+    # own resolved/undone state (an append-only log can't be updated in place).
+    return os.path.join(revertly_home(), "bursts")
+
+
 def mirror_root() -> str:
     # Tier-2 root-owned mirror lives here. Phase 1 just ensures the dir exists.
     return os.path.join(revertly_home(), "mirror")
@@ -120,6 +126,74 @@ def append_incident(tag: str, detail: str, session_id: str = "-") -> None:
         with open(incidents_log(), "a") as f:
             f.write(line)
     except OSError:
+        pass
+
+
+def record_burst(session_id: str, t_start: float, t_end: float,
+                 count: int) -> Optional[str]:
+    """Persist a detected runaway-deletion burst as its own JSON record and
+    return its id. Best-effort; returns None on failure (never raises).
+
+    Kept separate from the incident log (which is append-only) precisely so the
+    burst can later be marked `undone` in place — that's what the one-shot
+    `revertly undo` and the UI recovery banner flip."""
+    import json as _json
+    import time as _time
+    try:
+        ensure_dir(bursts_dir())
+        bid = f"{session_id}__{int(t_start)}"
+        rec = {"id": bid, "session_id": session_id,
+               "t_start": t_start, "t_end": t_end, "count": int(count),
+               "created": _time.time(), "undone": False,
+               "undone_at": None, "revert_id": None}
+        with open(os.path.join(bursts_dir(), bid + ".json"), "w") as f:
+            _json.dump(rec, f)
+        return bid
+    except OSError:
+        return None
+
+
+def list_bursts() -> list:
+    """All recorded bursts, newest first. Tolerant of a corrupt record."""
+    import json as _json
+    d = bursts_dir()
+    if not os.path.isdir(d):
+        return []
+    out = []
+    for fn in os.listdir(d):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(d, fn)) as f:
+                out.append(_json.load(f))
+        except (OSError, ValueError):
+            continue
+    out.sort(key=lambda r: r.get("created") or 0.0, reverse=True)
+    return out
+
+
+def latest_open_burst() -> Optional[dict]:
+    """The most recent burst that has not yet been undone, or None."""
+    for r in list_bursts():
+        if not r.get("undone"):
+            return r
+    return None
+
+
+def mark_burst_undone(burst_id: str, revert_id: Optional[str] = None) -> None:
+    """Flip a burst record to undone. Best-effort; never raises."""
+    import json as _json
+    import time as _time
+    p = os.path.join(bursts_dir(), burst_id + ".json")
+    try:
+        with open(p) as f:
+            rec = _json.load(f)
+        rec["undone"] = True
+        rec["undone_at"] = _time.time()
+        rec["revert_id"] = revert_id
+        with open(p, "w") as f:
+            _json.dump(rec, f)
+    except (OSError, ValueError):
         pass
 
 

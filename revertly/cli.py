@@ -435,6 +435,60 @@ def cmd_revert(args) -> int:
     return 1 if plan.errors else 0
 
 
+def cmd_undo(args) -> int:
+    """One-shot recovery for the most recent runaway-deletion burst: restore
+    every file it removed, from the pre-image clone, in a single command."""
+    burst = paths.latest_open_burst()
+    if not burst:
+        # nothing pending — but be helpful if one was already undone
+        done = next(iter(paths.list_bursts()), None)
+        if done and done.get("undone"):
+            print("revertly: nothing to undo — the last runaway-deletion burst "
+                  "was already restored.")
+        else:
+            print("revertly: no runaway-deletion burst detected. "
+                  "(For a normal undo, use `revertly revert`.)")
+        return 0
+    sid = burst["session_id"]
+    from .search import burst_deleted_paths
+    del_paths = burst_deleted_paths(sid, burst.get("t_start") or 0.0)
+    if not del_paths:
+        print(f"revertly: burst {burst['id']} has no recoverable deletions "
+              f"(they may have been reverted already).")
+        return 0
+    from .revert import Reverter
+    r = Reverter(paths.session_dir(sid))
+    ok, reason = r.is_revertible()
+    if not ok:
+        print(f"revertly: cannot undo burst in {sid}: {reason}")
+        return 1
+    plan = r.plan_paths(del_paths)
+    n = len(plan.restores)
+    print(f"runaway deletion in {sid}: {burst['count']} files deleted — "
+          f"{plan.summary()}")
+    if args.list:
+        for ch in plan.restores:
+            print(f"  restore {ch.path}")
+        for c in plan.conflicts:
+            print(f"  CONFLICT {c.path}: {c.reason}")
+    if args.dry_run:
+        print("(dry-run: nothing changed)")
+        return 0
+    if not args.yes and not _confirm(f"restore {n} deleted file(s)? [y/N] "):
+        print("aborted."); return 1
+    rid = r.apply(plan, force=args.force)
+    if rid is None:
+        print("nothing to restore (files already recovered).")
+        paths.mark_burst_undone(burst["id"], None)
+        return 0
+    paths.mark_burst_undone(burst["id"], rid)
+    for err in plan.errors:
+        print(f"  ⚠ {err}")
+    print(f"restored {n} file(s){' (with errors above)' if plan.errors else ''}. "
+          f"undo this undo with: revertly revert {rid}")
+    return 1 if plan.errors else 0
+
+
 def cmd_ui(args) -> int:
     from .ui.server import serve
     httpd, port = serve(port=args.port)
@@ -978,6 +1032,24 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--dry-run", action="store_true", help="preview only")
     rs.add_argument("--force", action="store_true", help="override conflicts")
     rs.set_defaults(func=cmd_restore)
+
+    ud = sub.add_parser(
+        "undo", help="one-shot: restore the last runaway-deletion burst",
+        description="When revertly detects a burst of deletions (a runaway "
+                    "agent, a hallucinated cleanup, an `rm -rf`), it records it. "
+                    "`revertly undo` restores every file that burst removed, in "
+                    "one shot, from the pre-image. It's itself a revert session, "
+                    "so you can undo the undo.",
+        epilog="examples:\n"
+               "  revertly undo            # restore the last runaway deletion\n"
+               "  revertly undo --list     # show the files first\n"
+               "  revertly undo --dry-run  # preview only\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ud.add_argument("--list", action="store_true", help="list the files first")
+    ud.add_argument("--yes", "-y", action="store_true", help="skip the confirm")
+    ud.add_argument("--dry-run", action="store_true", help="preview only")
+    ud.add_argument("--force", action="store_true", help="override conflicts")
+    ud.set_defaults(func=cmd_undo)
 
     rm = sub.add_parser("rm",
                         help="PERMANENTLY delete sessions from the store")

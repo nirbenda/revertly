@@ -216,6 +216,19 @@
   @keyframes secfresh { 0% { background: rgba(255,159,28,.28); } 100% { background: transparent; } }
   #sec-stamp { color: var(--ok); }
 
+  /* runaway-deletion recovery banner */
+  .burst-banner { display: flex; align-items: center; gap: 14px; margin: 0 0 18px;
+    padding: 14px 16px; border-radius: 12px;
+    background: linear-gradient(90deg, rgba(255,92,106,.16), rgba(255,159,28,.09));
+    border: 1px solid rgba(255,92,106,.45); box-shadow: 0 2px 16px rgba(255,92,106,.14); }
+  .burst-banner.done { background: rgba(51,214,159,.10); border-color: rgba(51,214,159,.40);
+    box-shadow: none; }
+  .burst-banner .bicon { font-size: 20px; line-height: 1; flex: none; }
+  .burst-banner .btext { flex: 1; min-width: 0; }
+  .burst-banner .btitle { font-weight: 700; }
+  .burst-banner .bsub { color: var(--muted); font-size: 12px; margin-top: 2px; word-break: break-all; }
+  .burst-banner .bactions { display: flex; gap: 8px; align-items: center; flex: none; }
+
   /* finishing touches */
   html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
   ::selection { background: rgba(255,159,28,.30); }
@@ -258,6 +271,7 @@
 </nav>
 
 <main>
+  <div id="burst-banner" class="burst-banner" style="display:none"></div>
   <div class="page-head"><h2 id="page-title">Timeline</h2><p id="page-sub"></p></div>
   <section id="tab-timeline" class="tab active">
     <div class="toolbar">
@@ -1198,7 +1212,60 @@ var liveTimer = null;
 function pollLive() { getJSON("/api/sessions").then(function(res){ renderLive(res.body || []); }); }
 setInterval(function(){ if (document.getElementById("tab-live").classList.contains("active")) pollLive(); }, 2000);
 
+// ---- runaway-deletion recovery banner ----
+// Polls /api/bursts; when a burst is unresolved, surfaces a one-click "Undo
+// all" across every tab. The undo is itself a revert session, so it's safe to
+// click even on a false positive.
+var burstDismissed = null;
+function renderBurst(list) {
+  var banner = document.getElementById("burst-banner");
+  var open = (list || []).filter(function(b){ return !b.undone; })[0];
+  if (!open || open.id === burstDismissed) { banner.style.display = "none"; return; }
+  banner.className = "burst-banner"; banner.style.display = ""; banner.innerHTML = "";
+  banner.appendChild(el("span", "bicon", "⚠"));
+  var text = el("div", "btext");
+  text.appendChild(el("div", "btitle", "Runaway deletion caught — " + open.count + " files removed"));
+  text.appendChild(el("div", "bsub", "session " + (open.session_name || open.session_id) + " · all recoverable from the pre-image"));
+  banner.appendChild(text);
+  var actions = el("div", "bactions");
+  var undo = el("button", "act primary", "⟲ Undo all " + open.count);
+  undo.addEventListener("click", function(){ doBurstUndo(open, undo); });
+  var review = el("button", "act", "Review");
+  review.addEventListener("click", function(){
+    switchTab("timeline");
+    document.getElementById("tl-filter").value = open.session_name || open.session_id;
+    renderTimeline();
+  });
+  var dismiss = el("button", "act mini", "✕");
+  dismiss.title = "dismiss (you can still undo from the CLI: revertly undo)";
+  dismiss.addEventListener("click", function(){ burstDismissed = open.id; banner.style.display = "none"; });
+  actions.appendChild(undo); actions.appendChild(review); actions.appendChild(dismiss);
+  banner.appendChild(actions);
+}
+function doBurstUndo(open, btn) {
+  btn.disabled = true; btn.textContent = "restoring…";
+  postJSON("/api/burst-undo", { id: open.id, dry_run: false }).then(function(res){
+    var banner = document.getElementById("burst-banner");
+    if (res.ok) {
+      banner.className = "burst-banner done"; banner.innerHTML = "";
+      banner.appendChild(el("span", "bicon", "✓"));
+      var t = el("div", "btext");
+      t.appendChild(el("div", "btitle", "Restored " + open.count + " files"));
+      var rid = (res.body && res.body.revert_id) || "";
+      t.appendChild(el("div", "bsub", rid ? ("undo this undo:  revertly revert " + rid) : "done"));
+      banner.appendChild(t);
+      loadTimeline();
+    } else {
+      btn.disabled = false; btn.textContent = "⟲ Undo all " + open.count;
+      uiAlert({ title: "Undo failed", body: (res.body && res.body.error) || "unknown error" });
+    }
+  });
+}
+function pollBursts() { getJSON("/api/bursts").then(function(res){ renderBurst(res.body || []); }); }
+setInterval(pollBursts, 3000);
+
 // boot
 loadTimeline();
+pollBursts();
 tabFromHash();
 </script>

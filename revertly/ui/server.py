@@ -154,6 +154,41 @@ def incidents_feed(limit: int = 1000):
     return {"records": rows, "total": len(rows)}
 
 
+def bursts_feed():
+    """Recorded runaway-deletion bursts, newest first, enriched with the
+    session's human name. Drives the UI recovery banner + Undo action."""
+    out = []
+    for b in paths.list_bursts():
+        meta = read_meta_raw(b.get("session_id", "")) or {}
+        rec = dict(b)
+        rec["session_name"] = meta.get("name") or b.get("session_id")
+        out.append(rec)
+    return out
+
+
+def run_burst_undo(burst_id: str, dry_run: bool, force: bool = False):
+    """Restore every file a burst deleted, in one shot, then mark it undone.
+    Reuses run_revert so it inherits preview/conflict-safety and produces a
+    revert-id you can undo. Returns (status, payload)."""
+    b = next((x for x in paths.list_bursts() if x.get("id") == burst_id), None)
+    if not b:
+        return 404, {"error": "unknown burst: %s" % burst_id}
+    try:
+        from revertly.search import burst_deleted_paths  # lazy, guarded
+    except ImportError as e:
+        return 501, {"error": "search unavailable: %s" % e}
+    dpaths = burst_deleted_paths(b["session_id"], b.get("t_start") or 0.0)
+    if not dpaths:
+        return 200, {"restored": 0, "note": "no recoverable deletions",
+                     "burst_id": burst_id}
+    status, payload = run_revert(b["session_id"], dpaths, dry_run, force=force)
+    if not dry_run and status == 200:
+        paths.mark_burst_undone(burst_id, payload.get("revert_id"))
+    payload["burst_id"] = burst_id
+    payload["count"] = b.get("count")
+    return status, payload
+
+
 def load_session(session_id: str):
     """Full session: {meta, events}, or None if unknown."""
     meta = _read_meta(session_id)
@@ -492,6 +527,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(storage_summary())
         if path == "/api/incidents":
             return self._send_json(incidents_feed())
+        if path == "/api/bursts":
+            return self._send_json(bursts_feed())
         if path == "/api/find":
             return self._serve_find(query)
 
@@ -525,6 +562,8 @@ class Handler(BaseHTTPRequestHandler):
         path = parsed.path
         if path == "/api/clear":
             return self._serve_clear()
+        if path == "/api/burst-undo":
+            return self._serve_burst_undo()
         prefix = "/api/session/"
         for suffix, handler in (("/revert", self._serve_revert),
                                 ("/delete", self._serve_delete)):
@@ -619,6 +658,22 @@ class Handler(BaseHTTPRequestHandler):
         if "error" in result:
             return self._error(404, result["error"])
         self._send_json(result)
+
+    def _serve_burst_undo(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+        except ValueError:
+            return self._error(400, "invalid JSON body")
+        if not isinstance(body, dict) or not body.get("id"):
+            return self._error(400, "body must be a JSON object with an 'id'")
+        dry_run = bool(body.get("dry_run", True))
+        force = bool(body.get("force", False))
+        if not dry_run and not self._has_token():
+            return self._error(403, "missing or bad X-Revertly-Token")
+        status, payload = run_burst_undo(str(body["id"]), dry_run, force=force)
+        self._send_json(payload, status=status)
 
     def _serve_revert(self, sid):
         length = int(self.headers.get("Content-Length") or 0)

@@ -62,6 +62,13 @@ class Config:
     # agnostic command guard: alert (log only) | block (refuse dangerous
     # commands with a message to the agent) | off (no interception)
     guard_mode: str = "alert"
+    # runaway-deletion detector: watches the *effect* stream (not commands, so
+    # it's immune to obfuscation and works for any agent). alert = incident +
+    # desktop notification; off = disabled. A trip records a burst that
+    # `revertly undo` (and the UI recovery banner) can restore in one shot.
+    delete_burst: str = "alert"          # alert | off
+    delete_burst_threshold: int = 25     # deletes within the window to trip
+    delete_burst_window: float = 3.0     # seconds
 
     # ---- glob helpers (operate on absolute, expanded paths) ----
 
@@ -232,6 +239,19 @@ def _apply(cfg: Config, section, key, val):
             if g is not None:
                 cfg.max_disk_gb = g
             return
+    # numeric guard knobs: coerce to int/float, ignore garbage (keep default)
+    if section == "guard" and key == "delete_burst_threshold":
+        try:
+            cfg.delete_burst_threshold = int(float(str(val).strip()))
+        except (TypeError, ValueError):
+            pass
+        return
+    if section == "guard" and key == "delete_burst_window":
+        try:
+            cfg.delete_burst_window = float(str(val).strip())
+        except (TypeError, ValueError):
+            pass
+        return
     mapping = {
         ("watch", "scope"): "watch_scope",
         ("watch", "exclude"): "exclude",
@@ -241,6 +261,7 @@ def _apply(cfg: Config, section, key, val):
         (None, "on_arm_failure"): "on_arm_failure",
         ("watch", "poll_interval"): "poll_interval",
         ("guard", "mode"): "guard_mode",
+        ("guard", "delete_burst"): "delete_burst",
     }
     attr = mapping.get((section, key))
     if attr:

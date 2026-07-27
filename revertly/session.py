@@ -6,6 +6,7 @@ Fail-closed invariant (#2): if arming fails, honor cfg.on_arm_failure.
 """
 from __future__ import annotations
 
+import collections
 import json
 import os
 import shutil
@@ -25,6 +26,58 @@ class ArmError(RuntimeError):
         self.policy = policy
 
 
+# Directories whose deletion is normal, high-volume, and regeneratable — we
+# still journal (and can revert) them, but they must NOT count toward a
+# "runaway deletion" alarm, or `rm -rf dist` would cry wolf every build.
+_REGENERATABLE_SEGMENTS = {
+    "build", "dist", "target", "out", "bin", "obj", ".next", ".nuxt",
+    "coverage", ".cache", ".parcel-cache", ".turbo", "tmp", ".tmp",
+    ".pytest_cache", ".mypy_cache", ".gradle", "__snapshots__",
+}
+
+
+def _is_regeneratable(path: str) -> bool:
+    parts = os.path.normpath(path or "").split(os.sep)
+    return any(seg in _REGENERATABLE_SEGMENTS for seg in parts)
+
+
+class _BurstDetector:
+    """Sliding-window counter over the *delete* event stream. Trips when the
+    count of significant deletions inside `window` seconds crosses `threshold`.
+
+    It watches effects, not commands — so it is immune to command obfuscation,
+    catches deletes from scripts / spawned binaries the same as a bare `rm`,
+    and is entirely agent-agnostic (no hooks). It cannot *prevent* the deletes
+    (that needs a kernel boundary); it exists so the damage is caught fast and
+    made undoable in one shot, since every deleted file is in the pre-image."""
+
+    def __init__(self, cfg, on_trip):
+        self.enabled = getattr(cfg, "delete_burst", "alert") != "off"
+        self.threshold = max(2, int(getattr(cfg, "delete_burst_threshold", 25)))
+        self.window = max(0.1, float(getattr(cfg, "delete_burst_window", 3.0)))
+        self._on_trip = on_trip
+        self._times = collections.deque()
+        self._last_trip = 0.0
+
+    def observe_delete(self, path: str, now: Optional[float] = None) -> None:
+        if not self.enabled or _is_regeneratable(path):
+            return
+        now = time.time() if now is None else now
+        self._times.append(now)
+        cutoff = now - self.window
+        while self._times and self._times[0] < cutoff:
+            self._times.popleft()
+        # cooldown: don't re-fire for the same ongoing wipe every event
+        if len(self._times) >= self.threshold and (now - self._last_trip) > self.window:
+            self._last_trip = now
+            t_start, count = self._times[0], len(self._times)
+            self._times.clear()
+            try:
+                self._on_trip(t_start, now, count)
+            except Exception:
+                pass
+
+
 class Session:
     def __init__(self, cwd, argv, cfg: Optional[Config] = None, *,
                  snapshotter=None, cloner=None, watcher=None, name: Optional[str] = None):
@@ -39,6 +92,7 @@ class Session:
         self._watchers = []              # active watchers (1 project + N tripwire roots)
         self._journal: Optional[Journal] = None
         self._tripwire = TripwireEngine(self.cfg)
+        self._burst = _BurstDetector(self.cfg, self._on_delete_burst)
         self.meta: Optional[SessionMeta] = None
 
     # ─────────────────────── arm ───────────────────────
@@ -223,6 +277,28 @@ class Session:
             self._notify(e, hit)
         if self._journal:
             self._journal.append(e)
+        # runaway-deletion detection runs on the same (post-exclude) stream, so
+        # ordinary excluded churn never counts. Tripwire/self-tamper deletes DO
+        # count — a burst of those is doubly alarming.
+        if e.kind == EventKind.FS and e.op == FsOp.DELETE and e.path:
+            self._burst.observe_delete(e.path)
+
+    def _on_delete_burst(self, t_start: float, t_end: float, count: int):
+        """A runaway-deletion burst tripped: record it (so `revertly undo` and
+        the UI recovery banner can restore it in one shot), log an incident,
+        and surface it loudly. We do NOT block — recovery is the guarantee."""
+        paths.record_burst(self.id, t_start, t_end, count)
+        dur = max(0.1, t_end - t_start)
+        detail = f"{count} files deleted in {dur:.1f}s (runaway deletion)"
+        paths.append_incident("DELETE_BURST", detail, session_id=self.id)
+        try:
+            import sys
+            print(f"revertly ⚠ DELETE_BURST: {detail} — undo it with "
+                  f"`revertly undo`", file=sys.stderr)
+        except Exception:
+            pass
+        self._desktop_notify("runaway deletion",
+                             f"{count} files deleted — run `revertly undo`")
 
     def _notify(self, e: Event, hit):
         """Surface a tripwire immediately: stderr line + cross-session incident

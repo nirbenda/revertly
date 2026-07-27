@@ -394,5 +394,100 @@ class TestHttpServer(_StoreFixture):
         self.assertNotIn(b"__REVERTLY_TOKEN__", body)
 
 
+class TestBurstEndpoints(_StoreFixture):
+    """/api/bursts feed + /api/burst-undo one-shot recovery. Standalone (not a
+    TestHttpServer subclass) so the extra burst session doesn't perturb the
+    inherited store-shape assertions."""
+
+    BURST_SID = "2026-07-25T11-00-00_rogue"
+
+    def setUp(self):
+        super().setUp()
+        self.httpd, self.port = server.serve(host="127.0.0.1", port=0)
+        self.proj = os.path.join(self.home, "rogue_project")
+        deleted = {"src/a.py": "AAA\n", "docs/b.md": "BBB\n"}
+        clone = paths.clone_dir(self.BURST_SID)
+        for rel, content in deleted.items():
+            _write(os.path.join(clone, rel), content)   # pre-image only
+        ended = 5000.0
+        meta = {"id": self.BURST_SID, "name": "rogue", "cwd": self.proj,
+                "argv": ["claude"], "started": ended - 100, "ended": ended,
+                "clone_path": clone, "armed": True}
+        _write(paths.meta_path(self.BURST_SID), json.dumps(meta))
+        lines = ""
+        for i, rel in enumerate(deleted):
+            lines += json.dumps({"kind": "fs", "op": "delete",
+                                 "path": os.path.join(self.proj, rel),
+                                 "t": 4950.0 + i}) + "\n"
+        _write(paths.journal_path(self.BURST_SID), lines)
+        os.makedirs(self.proj, exist_ok=True)          # project exists, files don't
+        paths.record_burst(self.BURST_SID, 4950.0, 4952.0, len(deleted))
+        self.deleted = deleted
+
+    def tearDown(self):
+        try:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+        finally:
+            super().tearDown()
+
+    def _get_json(self, path):
+        url = "http://127.0.0.1:%d%s" % (self.port, path)
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return resp.status, json.loads(resp.read().decode("utf-8"))
+
+    def _post_json(self, path, payload, token=None):
+        url = "http://127.0.0.1:%d%s" % (self.port, path)
+        headers = {"Content-Type": "application/json"}
+        if token is not None:
+            headers["X-Revertly-Token"] = token
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode("utf-8"),
+            method="POST", headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read().decode("utf-8"))
+
+    def test_bursts_feed_lists_the_burst(self):
+        status, data = self._get_json("/api/bursts")
+        self.assertEqual(status, 200)
+        self.assertTrue(any(b["session_id"] == self.BURST_SID for b in data))
+        b = next(b for b in data if b["session_id"] == self.BURST_SID)
+        self.assertEqual(b["session_name"], "rogue")
+        self.assertFalse(b["undone"])
+        self.assertEqual(b["count"], 2)
+
+    def test_burst_undo_requires_token_for_real(self):
+        bid = self._get_json("/api/bursts")[1][0]["id"]
+        status, _ = self._post_json("/api/burst-undo",
+                                    {"id": bid, "dry_run": False})  # no token
+        self.assertEqual(status, 403)
+
+    def test_burst_undo_restores_and_marks_done(self):
+        bid = self._get_json("/api/bursts")[1][0]["id"]
+        for rel in self.deleted:
+            self.assertFalse(os.path.exists(os.path.join(self.proj, rel)))
+        status, payload = self._post_json(
+            "/api/burst-undo", {"id": bid, "dry_run": False},
+            token=server.ACTION_TOKEN)
+        self.assertEqual(status, 200)
+        for rel, content in self.deleted.items():
+            p = os.path.join(self.proj, rel)
+            self.assertTrue(os.path.exists(p), rel)
+            with open(p) as f:
+                self.assertEqual(f.read(), content)
+        # burst now marked undone in the feed
+        _, data = self._get_json("/api/bursts")
+        b = next(b for b in data if b["id"] == bid)
+        self.assertTrue(b["undone"])
+
+    def test_burst_undo_unknown_id_404(self):
+        status, _ = self._post_json("/api/burst-undo",
+                                    {"id": "nope", "dry_run": True})
+        self.assertEqual(status, 404)
+
+
 if __name__ == "__main__":
     unittest.main()

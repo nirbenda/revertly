@@ -25,7 +25,7 @@ they happen — and can <b>block</b> them when you opt in. No accounts, no netwo
 ![platform](https://img.shields.io/badge/macOS-APFS-17130E?style=flat-square&logo=apple)
 ![deps](https://img.shields.io/badge/deps-zero-33D69F?style=flat-square)
 ![agents](https://img.shields.io/badge/agents-Claude_Codex_Gemini_Aider_Cursor-FF9F1C?style=flat-square)
-![tests](https://img.shields.io/badge/tests-233_passing-33D69F?style=flat-square)
+![tests](https://img.shields.io/badge/tests-251_passing-33D69F?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-A99C88?style=flat-square)
 
 </div>
@@ -286,6 +286,7 @@ Start from what you're trying to do:
 | know what happened to a file — in *any* session | `revertly find <pattern>` |
 | get one file or folder back, no session id needed | `revertly restore <path>` |
 | undo an entire session | `revertly revert` |
+| undo a runaway deletion (agent went rogue) | `revertly undo` |
 | undo just one file from a session | `revertly revert <session> <path>` |
 | see every restorable version of a file | `revertly versions <path>` |
 | check the net is armed and healthy | `revertly doctor` |
@@ -309,6 +310,7 @@ revertly find <pattern> [--op delete] [--since 7d]   "what happened to X, and wh
 ```
 revertly restore <path>          give one file/dir back — no session id needed
 revertly revert [session] [path…|glob…] [--dry-run] [--force] [--yes]
+revertly undo [--list]           one-shot: restore the last runaway-deletion burst
 revertly versions <path>         which sessions can restore this file, and what each did
 ```
 
@@ -445,14 +447,17 @@ UI's Storage tab clears history at a safe point you pick.
 **What if the agent tries to wipe the whole machine?**
 The OS survives regardless — macOS seals the system volume (SIP), so not even
 root can `rm -rf` it; what's at risk is your *data*. revertly's answer, in
-order: shell-level wipes (`rm -rf ~`, `rm -rf /`, `diskutil erase…`, `dd` to a
-raw disk) classify as `SUSPICIOUS` — **refused in opt-in `block` mode**, alerted
-otherwise; tripwires and `SELF_TAMPER` fire notifications *while it happens*;
-and the **root-protected APFS snapshot from session start survives a same-user
-wipe** — every byte is recoverable from Recovery Mode. Honest limits: the
-snapshot window is ~24h (it's a session backstop, **not a backup** — keep Time
-Machine), and a spawned binary calling `/bin/rm` directly evades the userspace
-guard (kernel-level enforcement is Phase 2).
+order: a **runaway-deletion detector** watches the *effect* stream (so it's
+immune to command obfuscation and works for any agent) — a burst of deletions
+fires an incident and a desktop alert *while it's happening*, and every deleted
+file is restorable in one shot with **`revertly undo`** (or one click on the
+UI's recovery banner), because the pre-image clone was taken before the agent
+ran. Shell-level wipes (`rm -rf ~`, `diskutil erase…`, `dd` to a raw disk) also
+classify as `SUSPICIOUS`, and the **root-protected APFS snapshot survives a
+same-user wipe** for out-of-project damage. Honest limits: revertly *contains
+and recovers*, it doesn't *prevent* (that needs a kernel boundary — Phase 2);
+the snapshot window is ~24h (a session backstop, **not a backup** — keep Time
+Machine).
 
 **What if the agent deletes revertly itself?**
 It can — same user — but not silently: sentinel watchers fire a `SELF_TAMPER`
@@ -484,9 +489,10 @@ directory under `~/.revertly` on your disk.
 - [x] Record every file event — create / edit / delete / **rename-aware** — to a hash-chained journal
 - [x] CoW pre-image + APFS volume snapshot, armed before the agent starts
 - [x] One-command revert: a file, a session, a glob — preview-first, itself undoable
+- [x] Runaway-deletion detector + one-shot `revertly undo` (and a UI recovery banner)
 - [x] Tripwires + `SELF_TAMPER` + harness-agnostic command guard (+ Claude Code hook)
 - [x] Multi-agent detect & bind, local control-panel UI, storage retention
-- [x] 233 tests, zero dependencies, pure stdlib
+- [x] 251 tests, zero dependencies, pure stdlib
 
 **Phase 2 — next:**
 - [ ] Wire the APFS snapshot into `revertly revert` (out-of-project restores)
@@ -518,7 +524,7 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-233 tests (including an end-to-end lifecycle test, a security/tamper suite,
+251 tests (including an end-to-end lifecycle test, a security/tamper suite,
 move-chain/data-loss regressions, and the retention planner) across model,
 config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
 session, cli, ui, and hardening. TDD throughout.

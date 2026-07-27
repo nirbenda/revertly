@@ -65,6 +65,25 @@ def read_events_raw(session_id: str) -> List[dict]:
     return out
 
 
+def burst_deleted_paths(session_id: str, t_start: float) -> List[str]:
+    """Paths the session deleted at or after `t_start` — the file set a
+    runaway-deletion burst removed. Order-preserving and de-duplicated; the
+    reverter restores each from the pre-image clone. (Reconstructed from the
+    journal at undo time so it captures the *whole* burst, including deletions
+    that landed after the alarm first tripped.)"""
+    seen, out = set(), []
+    for ev in read_events_raw(session_id):
+        if ev.get("op") != "delete":
+            continue
+        if (ev.get("t") or 0.0) < t_start:
+            continue
+        p = ev.get("path")
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
 def read_meta_raw(session_id: str) -> dict:
     mp = paths.meta_path(session_id)
     try:
