@@ -131,6 +131,32 @@ class TestShimArmFailure(SessionBase):
         call.assert_not_called()   # the command must NOT have run
 
 
+class TestShimBypassLogged(SessionBase):
+    def test_disable_env_logs_bypass_incident(self):
+        # REVERTLY_DISABLE must go through the python engine so the bypass is
+        # RECORDED — the shell shim must not short-circuit it silently.
+        from unittest import mock
+        from revertly import shim
+        with mock.patch.dict(os.environ, {"REVERTLY_DISABLE": "1"}), \
+             mock.patch("revertly.shim._exec_unprotected", return_value=0) as ex:
+            rc = shim.run_wrapped(["--", "echo", "hi"])
+        self.assertEqual(rc, 0)
+        ex.assert_called_once()
+        with open(paths.incidents_log()) as f:
+            body = f.read()
+        self.assertIn("BYPASS", body)
+        self.assertIn("REVERTLY_DISABLE", body)
+
+    def test_shim_script_does_not_short_circuit_disable(self):
+        # the generated shell script must not exec the real command on
+        # REVERTLY_DISABLE before python can log the bypass.
+        from revertly import shim
+        p = shim.install_shim("claude")
+        with open(p) as f:
+            script = f.read()
+        self.assertNotIn('if [ -n "$REVERTLY_DISABLE" ]; then exec', script)
+
+
 class TestEventEnrichment(SessionBase):
     def _emit_and_read(self, path, op):
         s = self._mk()

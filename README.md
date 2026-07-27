@@ -25,7 +25,7 @@ they happen — and can <b>block</b> them when you opt in. No accounts, no netwo
 ![platform](https://img.shields.io/badge/macOS-APFS-17130E?style=flat-square&logo=apple)
 ![deps](https://img.shields.io/badge/deps-zero-33D69F?style=flat-square)
 ![agents](https://img.shields.io/badge/agents-Claude_Codex_Gemini_Aider_Cursor-FF9F1C?style=flat-square)
-![tests](https://img.shields.io/badge/tests-228_passing-33D69F?style=flat-square)
+![tests](https://img.shields.io/badge/tests-230_passing-33D69F?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-A99C88?style=flat-square)
 
 </div>
@@ -277,7 +277,24 @@ makes it visible or undoes it. This is what *loud and reversible* buys you.
 
 ## Commands
 
-Grouped by what you're trying to do (run `revertly <command> -h` for details
+Start from what you're trying to do:
+
+| I want to… | Run |
+|---|---|
+| see what the last session just did | `revertly last` |
+| see the exact changes, pre-image vs now | `revertly diff` |
+| know what happened to a file — in *any* session | `revertly find <pattern>` |
+| get one file or folder back, no session id needed | `revertly restore <path>` |
+| undo an entire session | `revertly revert` |
+| undo just one file from a session | `revertly revert <session> <path>` |
+| see every restorable version of a file | `revertly versions <path>` |
+| check the net is armed and healthy | `revertly doctor` |
+| audit the history for tampering | `revertly verify --all` |
+| free up disk at a safe point | `revertly clear --keep 7d` |
+| wrap another agent | `revertly bind codex` |
+| point and click instead | `revertly ui` |
+
+Full reference, grouped by task (run `revertly <command> -h` for details
 and examples on any of them):
 
 **See what the agent just did**
@@ -312,6 +329,19 @@ revertly verify [session|--all]  audit journal hash chains for tampering
 revertly pause | resume          disarm / rearm without uninstalling
 revertly config | uninstall [--purge]
 ```
+
+**Environment flags** — every escape hatch is deliberate, and turning the whole
+net off (`REVERTLY_DISABLE`, `revertly pause`) is itself **recorded as a
+`BYPASS` incident** — bypassing is allowed, but never silent:
+
+| Flag | Effect |
+|---|---|
+| `REVERTLY_DISABLE=1` | run the wrapped command once with **no net** (logged) |
+| `REVERTLY_GUARD_DISABLE=1` | bypass just the command guard for one run |
+| `REVERTLY_NO_SNAPSHOT=1` | skip the APFS volume-snapshot layer for one run |
+| `REVERTLY_ALLOW=1` | let one guarded command through in `block` mode |
+| `REVERTLY_NO_NOTIFY=1` | suppress desktop notifications (useful in CI) |
+| `REVERTLY_HOME=<dir>` | relocate the store (default `~/.revertly`) |
 
 ## Managing stored history
 
@@ -391,6 +421,74 @@ secret or opens a network socket is invisible until the Endpoint-Security build.
 The hook is **alert-only** (blocking is Phase 2). The shim is an ergonomic
 default, not a security boundary; no telemetry or admin — Phase 2.
 
+## FAQ
+
+**Does it slow the agent down?**
+Barely. The one-time cost is at arm: a copy-on-write clone (near-instant on
+APFS — CoW shares blocks) plus a volume snapshot; revertly warns if arming ever
+takes >1s. While the agent runs, the watcher polls in the background and the
+guard shims `exec` straight into the real binaries — there's nothing in the
+file-I/O path.
+
+**Doesn't git already do this?**
+Git protects what you *commit*. revertly records everything **between** commits —
+untracked files, `.env`, the file the agent deleted before you ever staged it —
+with zero ceremony, and its diffs/restores don't touch your git state at all
+(no stash, no reflog spelunking, no commits made on your behalf).
+
+**How much disk does it use?**
+Almost none at first: clones share blocks with the originals. Bytes become real
+only when the agent overwrites or deletes files. Auto-retention (default: 30
+days / disk cap) prunes old sessions, `revertly status` shows usage, and the
+UI's Storage tab clears history at a safe point you pick.
+
+**What if the agent deletes revertly itself?**
+It can — same user — but not silently: sentinel watchers fire a `SELF_TAMPER`
+alert, the journal is hash-chained and sealed immutable, and the APFS volume
+snapshot needs **root** to delete. Damage stays loud and recoverable, not
+prevented — read [the honest version](#security-model--the-honest-version).
+
+**Binary files?**
+Yes. Pre-images are byte-exact clones, so restore works for any file type; the
+UI marks binaries and skips the meaningless text diff.
+
+**Why not just run the agent in a sandbox?**
+Sandboxes make agents safe by making them useless — no real environment, no
+real credentials, constant friction. revertly's bet: keep the agent at full
+speed and make the *machine* forgiving instead. See [Why](#why).
+
+**Which agents work?**
+Claude Code, Codex, Gemini, Aider, and Cursor CLI are detected and bound by the
+installer; `revertly bind <cmd>` wraps any other CLI. GUI agents (Cursor app,
+Copilot in VS Code) can't be shimmed yet — an ambient watch mode is planned.
+
+**Does anything leave my machine?**
+No. No accounts, no network calls, no telemetry. The store is a `0700`
+directory under `~/.revertly` on your disk.
+
+## Roadmap
+
+**Phase 1 — shipped (what this repo is):**
+- [x] Record every file event — create / edit / delete / **rename-aware** — to a hash-chained journal
+- [x] CoW pre-image + APFS volume snapshot, armed before the agent starts
+- [x] One-command revert: a file, a session, a glob — preview-first, itself undoable
+- [x] Tripwires + `SELF_TAMPER` + harness-agnostic command guard (+ Claude Code hook)
+- [x] Multi-agent detect & bind, local control-panel UI, storage retention
+- [x] 230 tests, zero dependencies, pure stdlib
+
+**Phase 2 — next:**
+- [ ] Wire the APFS snapshot into `revertly revert` (out-of-project restores)
+- [ ] FSEvents watcher backend (sub-poll fidelity, big-repo scaling)
+- [ ] Ambient watch mode for GUI/IDE agents (Cursor app, Copilot)
+- [ ] Linux support (the watcher and revert engine are already portable)
+- [ ] Kernel-level enforcement: opt-in `sandbox-exec` profile → Endpoint Security build
+- [ ] Fleet console & telemetry for teams — the commercial layer
+
+> **The local tool stays MIT-licensed, free, forever.** Everything in Phase 1 —
+> record, revert, guard, UI — is and remains open source. If revertly ever has
+> a paid product, it's the fleet/console layer for teams, never a lock on your
+> own safety net.
+
 ## Uninstall
 
 ```sh
@@ -408,7 +506,7 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-228 tests (including an end-to-end lifecycle test, a security/tamper suite,
+230 tests (including an end-to-end lifecycle test, a security/tamper suite,
 move-chain/data-loss regressions, and the retention planner) across model,
 config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
 session, cli, ui, and hardening. TDD throughout.

@@ -52,7 +52,10 @@ def install_shim(cmd_name: str = "claude") -> str:
 # Fail-safe: if revertly is unavailable (repo moved/deleted, python gone), run
 # the real command UNPROTECTED rather than break the user's `{cmd_name}`.
 REAL={real}
-if [ -n "$REVERTLY_DISABLE" ]; then exec "$REAL" "$@"; fi
+# NOTE: REVERTLY_DISABLE is honored in the python engine (run_wrapped), not
+# here — so the bypass is LOGGED as a BYPASS incident before exec'ing the
+# real command. If the engine is unavailable the fallback below still runs
+# the real command, so the escape hatch can never brick `{cmd_name}`.
 export PYTHONPATH="{_repo_root()}:$PYTHONPATH"
 if {sys.executable} -c 'import revertly' 2>/dev/null; then
   exec {sys.executable} -m revertly shim -- "$REAL" "$@"
