@@ -161,6 +161,11 @@ def _print_session(sid) -> int:
         print(f"  security (hook layer): {len(hf)} finding(s)")
         for f in hf[:20]:
             print(f"    {f.get('kind','?')}: {f.get('detail','')}")
+    # next steps — spelled out so a human OR an agent can act without guessing
+    print("  next:")
+    print(f"    see the changes : revertly diff {sid}")
+    print(f"    undo them all   : revertly revert {sid}   (add --dry-run to preview)")
+    print(f"    one file back   : revertly restore <path>")
     return 0
 
 
@@ -304,6 +309,9 @@ def cmd_diff(args) -> int:
                                  fromfile=f"pre:{ch.path}", tofile=f"cur:{ch.path}")
         sys.stdout.writelines(d)
     print(f"\n{plan.summary()}")
+    if plan.restores or plan.deletes:
+        tail = (" " + " ".join(args.paths)) if args.paths else ""
+        print(f"↳ undo: revertly revert {sid}{tail}   (add --dry-run to preview)")
     return 0
 
 
@@ -487,6 +495,78 @@ def cmd_undo(args) -> int:
     print(f"restored {n} file(s){' (with errors above)' if plan.errors else ''}. "
           f"undo this undo with: revertly revert {rid}")
     return 1 if plan.errors else 0
+
+
+def cmd_redo(args) -> int:
+    """The forward step after an 'oops': re-apply what your most recent
+    `revertly revert` undid. Every revert is itself a session, so redo simply
+    reverts the newest revert — restoring the post-session state it rolled
+    back. (Both directions are always available via `revertly revert <id>`.)"""
+    target = None
+    for sid in paths.list_session_ids()[::-1]:      # newest first
+        if (_load_meta(sid) or {}).get("is_revert"):
+            target = sid
+            break
+    if not target:
+        print("revertly: nothing to redo — redo re-applies your most recent "
+              "`revertly revert`, and none was found.")
+        return 0
+    from .revert import Reverter
+    r = Reverter(paths.session_dir(target))
+    ok, reason = r.is_revertible()
+    if not ok:
+        print(f"revertly: cannot redo {target}: {reason}")
+        return 1
+    plan = r.plan_paths(args.paths) if args.paths else r.plan()
+    print(f"redo: re-applying what revert {target} undid — {plan.summary()}")
+    if args.dry_run:
+        print("(dry-run: nothing changed)")
+        return 0
+    if not plan.is_clean and not args.force:
+        print("revertly: conflicts present; re-run with --force to override them "
+              "(they are skipped otherwise).")
+    if not args.yes and not _confirm("proceed? [y/N] "):
+        print("aborted."); return 1
+    rid = r.apply(plan, force=args.force)
+    if rid is None:
+        print("nothing to redo (already re-applied).")
+        return 0
+    for err in plan.errors:
+        print(f"  ⚠ {err}")
+    print(f"redone{' (with errors above)' if plan.errors else ''}. "
+          f"go back again with: revertly revert {rid}")
+    return 1 if plan.errors else 0
+
+
+def cmd_skill(args) -> int:
+    """Install/print the agent-facing instructions so a coding agent knows how
+    to drive revertly when the user asks ('what changed?', 'undo that')."""
+    from . import skill
+    if args.print_snippet:
+        print(skill.AGENTS_MD)
+        return 0
+    if args.uninstall:
+        removed = skill.uninstall_claude_skill()
+        print("removed the revertly Claude Code skill."
+              if removed else "no revertly skill installed.")
+        return 0
+    if args.install:
+        p = skill.install_claude_skill()
+        print(f"installed Claude Code skill: {p}")
+        print("Claude Code will now use revertly when you ask it to inspect or "
+              "undo changes (\"what did you change?\", \"undo that\", \"oops\").")
+        print("For Codex / Cursor / others, add the snippet to your project:")
+        print("  revertly skill --print >> AGENTS.md")
+        return 0
+    # no flag → explain + status
+    print("revertly skill — teach your coding agent to drive revertly.\n")
+    print(f"  Claude Code skill: "
+          f"{'installed' if skill.skill_installed() else 'not installed'}  "
+          f"({skill.claude_skill_dir()})")
+    print("\n  revertly skill --install     install the Claude Code skill")
+    print("  revertly skill --print       print an AGENTS.md snippet (Codex/Cursor/…)")
+    print("  revertly skill --uninstall   remove the Claude Code skill")
+    return 0
 
 
 def cmd_ui(args) -> int:
@@ -803,6 +883,15 @@ def cmd_install(args) -> int:
     if bound:
         print(f"\nOpen a NEW terminal, then use {', '.join(bound)} as usual — "
               f"revertly arms automatically. Check with: revertly doctor")
+    # optional: teach the agent to drive revertly on request
+    if getattr(args, "skill", False):
+        from . import skill
+        p = skill.install_claude_skill()
+        print(f"\ninstalled Claude Code skill: {p}")
+        print("  → your agent can now inspect/undo with revertly when you ask.")
+    else:
+        print("\nTip: `revertly skill --install` lets your agent run revertly "
+              "for you (\"what changed?\", \"undo that\").")
     return 0
 
 
@@ -947,6 +1036,8 @@ common workflows
     revertly restore <file>          put one file back (no session id needed)
     revertly revert                  undo the whole last session (asks first)
     revertly revert <id> <path>…     undo just some paths of a session
+    revertly undo                    restore the last runaway-deletion burst
+    revertly redo                    re-apply what your last revert undid
     revertly find <name>             which session touched a file, and when
   keep the store in check (pre-image clones pile up)
     revertly status                  disk usage + recent sessions
@@ -954,6 +1045,7 @@ common workflows
     revertly gc                      apply the retention policy (age + cap)
   set up & check health
     revertly install                 detect agent CLIs and bind revertly to them
+    revertly skill --install         let your agent run revertly for you
     revertly agents                  which agents are on PATH / bound
     revertly doctor                  is the net armed and healthy?
     revertly ui                      open the visual control panel
@@ -1065,6 +1157,38 @@ def build_parser() -> argparse.ArgumentParser:
     ud.add_argument("--force", action="store_true", help="override conflicts")
     ud.set_defaults(func=cmd_undo)
 
+    rd = sub.add_parser(
+        "redo", help="re-apply what your last `revertly revert` undid",
+        description="The forward step after an 'oops'. Every revert is itself a "
+                    "session, so redo reverts the newest revert — restoring the "
+                    "state it rolled back. You can always go the other way again "
+                    "with the id it prints.",
+        epilog="examples:\n"
+               "  revertly redo            # re-apply the change you just reverted\n"
+               "  revertly redo --dry-run  # preview only\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    rd.add_argument("paths", nargs="*", help="limit to these paths/globs")
+    rd.add_argument("--yes", "-y", action="store_true", help="skip the confirm")
+    rd.add_argument("--dry-run", action="store_true", help="preview only")
+    rd.add_argument("--force", action="store_true", help="override conflicts")
+    rd.set_defaults(func=cmd_redo)
+
+    sk = sub.add_parser(
+        "skill", help="teach your coding agent to drive revertly (Claude/Codex/…)",
+        description="Install a Claude Code skill (or print an AGENTS.md snippet) "
+                    "so your agent knows how to inspect and undo changes with "
+                    "revertly when you ask — 'what did you change?', 'undo that', "
+                    "'oops'. Opt-in; nothing is placed without this command.",
+        epilog="examples:\n"
+               "  revertly skill --install         # Claude Code (~/.claude/skills)\n"
+               "  revertly skill --print >> AGENTS.md   # Codex / Cursor / others\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sk.add_argument("--install", action="store_true", help="install the Claude Code skill")
+    sk.add_argument("--print", dest="print_snippet", action="store_true",
+                    help="print an AGENTS.md snippet to stdout")
+    sk.add_argument("--uninstall", action="store_true", help="remove the Claude Code skill")
+    sk.set_defaults(func=cmd_skill)
+
     rm = sub.add_parser("rm",
                         help="PERMANENTLY delete sessions from the store")
     rm.add_argument("sessions", nargs="+")
@@ -1139,6 +1263,8 @@ def build_parser() -> argparse.ArgumentParser:
     ins.add_argument("--none", action="store_true", help="launcher only, bind nothing")
     ins.add_argument("--no-profile", action="store_true",
                      help="don't touch the shell profile; just print the PATH line")
+    ins.add_argument("--skill", action="store_true",
+                     help="also install the Claude Code skill so your agent can drive revertly")
     ins.set_defaults(func=cmd_install)
 
     bd = sub.add_parser("bind", help="bind revertly to an agent command (add a shim)")
@@ -1191,6 +1317,8 @@ def main(argv=None) -> int:
             print("  claude \"…\"                use Claude Code as usual — it's now recorded")
             print("  revertly last            see what it changed")
             print("  revertly restore <file>  put a file back  ·  revertly revert  undo it all")
+            print("  revertly redo            re-apply what you just reverted")
+            print("  revertly skill --install let your agent do all this on request")
             print("  revertly ui              visual control panel")
             print()
             print("All commands:  revertly --help      One command:  revertly <cmd> -h")

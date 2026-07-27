@@ -10,6 +10,7 @@ import os
 import shutil
 import tempfile
 import time
+import types
 import unittest
 
 from revertly import paths
@@ -666,6 +667,47 @@ class TestMoveChainRobustness(RevertTestCase):
                          "healthy paths must still be reverted")
         self.assertTrue(any("bad.txt" in e for e in plan.errors),
                         "the failed path must be reported")
+
+
+class TestRedo(RevertTestCase):
+    """`revertly redo` = re-apply what the last revert undid (the forward step)."""
+
+    def _args(self, **kw):
+        base = {"paths": [], "yes": True, "dry_run": False, "force": False}
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def test_redo_reapplies_last_revert(self):
+        from revertly.cli import cmd_redo
+        # session S edits a.txt orig -> changed
+        self.fx.seed("a.txt", "orig")
+        self.fx.modify("a.txt", "changed")
+        self.fx.finalize()
+        # undo: revert S -> a.txt back to "orig" (creates a revert session)
+        r = Reverter(paths.session_dir(self.fx.sid))
+        self.assertIsNotNone(r.apply(r.plan()))
+        self.assertEqual(self.fx.read_project("a.txt"), b"orig")
+        # redo: re-apply the edit
+        self.assertEqual(cmd_redo(self._args()), 0)
+        self.assertEqual(self.fx.read_project("a.txt"), b"changed")
+
+    def test_redo_noop_when_no_revert_exists(self):
+        from revertly.cli import cmd_redo
+        self.fx.seed("a.txt", "x")
+        self.fx.finalize()
+        self.assertEqual(cmd_redo(self._args()), 0)   # only a normal session
+        self.assertEqual(self.fx.read_project("a.txt"), b"x")
+
+    def test_redo_dry_run_changes_nothing(self):
+        from revertly.cli import cmd_redo
+        self.fx.seed("a.txt", "orig")
+        self.fx.modify("a.txt", "changed")
+        self.fx.finalize()
+        Reverter(paths.session_dir(self.fx.sid)).apply(
+            Reverter(paths.session_dir(self.fx.sid)).plan())
+        self.assertEqual(self.fx.read_project("a.txt"), b"orig")
+        cmd_redo(self._args(dry_run=True))
+        self.assertEqual(self.fx.read_project("a.txt"), b"orig")  # unchanged
 
 
 if __name__ == "__main__":

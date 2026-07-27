@@ -25,7 +25,7 @@ they happen — and can <b>block</b> them when you opt in. No accounts, no netwo
 ![platform](https://img.shields.io/badge/platform-macOS_·_Linux_(exp)-17130E?style=flat-square)
 ![deps](https://img.shields.io/badge/deps-zero-33D69F?style=flat-square)
 ![agents](https://img.shields.io/badge/agents-Claude_Codex_Gemini_Aider_Cursor-FF9F1C?style=flat-square)
-![tests](https://img.shields.io/badge/tests-258_passing-33D69F?style=flat-square)
+![tests](https://img.shields.io/badge/tests-266_passing-33D69F?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-A99C88?style=flat-square)
 
 </div>
@@ -221,6 +221,16 @@ shown above — timeline, cross-session **Find**, diffs, one-click **revert**, a
 **live security feed**, and storage cleanup. Every action shows its equivalent
 CLI command; tabs are bookmarkable via `#hash`.
 
+### Let the agent drive it
+
+Or just *ask* your agent. `revertly skill --install` drops a **Claude Code skill**
+(and `revertly skill --print >> AGENTS.md` covers Codex / Cursor) that teaches the
+agent to use revertly on request — so *"what did you change?"*, *"undo that"*, or
+*"oops, put it back"* make it run `revertly diff` / `revert` / `redo` for you. The
+whole CLI is built for this: bare `revertly` and every `-h` print the exact
+next-step commands, so an agent can chain them without guessing. Opt-in, and the
+skill tells the agent **not** to disable the safety net.
+
 ## How the net is built
 
 Before the wrapped command ever executes, four independent layers arm — each one
@@ -295,6 +305,7 @@ Start from what you're trying to do:
 | get one file or folder back, no session id needed | `revertly restore <path>` |
 | undo an entire session | `revertly revert` |
 | undo a runaway deletion (agent went rogue) | `revertly undo` |
+| redo — re-apply what I just reverted | `revertly redo` |
 | undo just one file from a session | `revertly revert <session> <path>` |
 | see every restorable version of a file | `revertly versions <path>` |
 | check the net is armed and healthy | `revertly doctor` |
@@ -302,6 +313,7 @@ Start from what you're trying to do:
 | free up disk at a safe point | `revertly clear --keep 7d` |
 | wrap another agent | `revertly bind codex` |
 | point and click instead | `revertly ui` |
+| let my agent do all this on request | `revertly skill --install` |
 
 Full reference, grouped by task (run `revertly <command> -h` for details
 and examples on any of them):
@@ -319,6 +331,7 @@ revertly find <pattern> [--op delete] [--since 7d]   "what happened to X, and wh
 revertly restore <path>          give one file/dir back — no session id needed
 revertly revert [session] [path…|glob…] [--dry-run] [--force] [--yes]
 revertly undo [--list]           one-shot: restore the last runaway-deletion burst
+revertly redo [--dry-run]        re-apply what your last revert undid (the forward step)
 revertly versions <path>         which sessions can restore this file, and what each did
 ```
 
@@ -332,7 +345,8 @@ revertly rm <session…> [--force]      permanently delete specific sessions
 
 **Set up, inspect, and check health**
 ```
-revertly install [--no-profile]  add the claude shim to your PATH
+revertly install [--no-profile] [--skill]  add the shim to PATH (+ optional agent skill)
+revertly skill [--install|--print]  teach your agent to drive revertly (Claude / AGENTS.md)
 revertly ui [--port N]           visual control panel (timeline/find/diff/revert/security/storage/live)
 revertly doctor                  is the net armed and healthy? (incl. a security section)
 revertly verify [session|--all]  audit journal hash chains for tampering
@@ -516,7 +530,7 @@ directory under `~/.revertly` on your disk.
 - [x] Runaway-deletion detector + one-shot `revertly undo` (and a UI recovery banner)
 - [x] Tripwires + `SELF_TAMPER` + harness-agnostic command guard (+ Claude Code hook)
 - [x] Multi-agent detect & bind, local control-panel UI, storage retention
-- [x] 258 tests, zero dependencies, pure stdlib
+- [x] 266 tests, zero dependencies, pure stdlib
 
 **Phase 2 — next:**
 - [ ] Wire the APFS snapshot into `revertly revert` (out-of-project restores)
@@ -548,7 +562,7 @@ your revert points.
 ./verify.sh        # py_compile gate + full unittest suite + e2e smoke
 ```
 
-258 tests (including an end-to-end lifecycle test, a security/tamper suite,
+266 tests (including an end-to-end lifecycle test, a security/tamper suite,
 move-chain/data-loss regressions, and the retention planner) across model,
 config, journal, snapshot, clone, watch, tripwire, search, revert, retention,
 session, cli, ui, and hardening. TDD throughout.
