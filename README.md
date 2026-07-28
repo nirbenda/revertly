@@ -44,6 +44,8 @@ git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
   <br><sub>↑ …or point and click. <code>revertly ui</code> — a local control panel for the same thing.</sub>
 </p>
 
+<p align="center"><b><a href="https://github.com/nirbenda/revertly">⭐ Star revertly</a></b> if this looks useful — it's how other devs find it.</p>
+
 ## Why
 
 Sandboxes make agents safe by making them useless. revertly makes the **machine
