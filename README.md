@@ -44,18 +44,6 @@ git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
   <br><sub>↑ …or point and click. <code>revertly ui</code> — a local control panel for the same thing.</sub>
 </p>
 
-<details>
-<summary><b>⚠️ Phase 1 — experimental.</b> Local, single-machine — macOS (APFS) full, Linux experimental. <i>(read before you deploy)</i></summary>
-
-<br>
-
-A developer safety net that's **tamper-evident, not tamper-proof** — a
-same-UID/hijacked agent is made *loud and logged*, not *stopped* (see
-[`THREAT-MODEL.md`](THREAT-MODEL.md)). Not yet a managed/fleet security control.
-Try it, break it, tell us — but don't make it your only guardrail.
-
-</details>
-
 ## Why
 
 Sandboxes make agents safe by making them useless. revertly makes the **machine
@@ -169,6 +157,19 @@ only inside a tool — it's all plain files under `~/.revertly`.
   those is planned.
 
 ## Install
+
+<details>
+<summary><b>⚠️ Phase 1 — experimental. Read this before you deploy.</b></summary>
+
+<br>
+
+revertly is a developer safety net that's **tamper-evident, not tamper-proof**:
+a same-UID or hijacked agent is made *loud and logged*, not *stopped* (see
+[`THREAT-MODEL.md`](THREAT-MODEL.md)). It's local and single-machine — not yet a
+managed/fleet security control. Try it, break it, tell us — but don't make it
+your only guardrail.
+
+</details>
 
 Stock macOS is all you need — APFS and `python3` are already there.
 
