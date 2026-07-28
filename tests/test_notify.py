@@ -30,22 +30,27 @@ class TestDesktopNotify(unittest.TestCase):
             self.assertIn("revertly: Title", argv)
             self.assertIn("Body", argv)
 
-    def test_darwin_uses_osascript(self):
+    def test_darwin_uses_absolute_osascript_never_the_path_shim(self):
+        # REGRESSION: notifications must call /usr/bin/osascript by absolute
+        # path. A bare "osascript" would resolve to revertly's own cmdbin guard
+        # shim during a session -> flagged SUSPICIOUS -> notify -> infinite loop.
         with mock.patch.dict(os.environ, {}, clear=False), \
              mock.patch("revertly.notify.sys.platform", "darwin"), \
-             mock.patch("revertly.notify.shutil.which",
-                        side_effect=lambda n: "/usr/bin/osascript" if n == "osascript" else None), \
+             mock.patch("revertly.notify.os.path.exists", return_value=True), \
              mock.patch("revertly.notify.subprocess.Popen") as popen:
             os.environ.pop("REVERTLY_NO_NOTIFY", None)
             notify.desktop("T", "B")
-            self.assertEqual(popen.call_args[0][0][0], "osascript")
+            argv0 = popen.call_args[0][0][0]
+            self.assertEqual(argv0, "/usr/bin/osascript")
+            self.assertNotEqual(argv0, "osascript")   # never PATH-resolved
 
     def test_no_notifier_present_is_silent_noop(self):
         with mock.patch.dict(os.environ, {}, clear=False), \
-             mock.patch("revertly.notify.shutil.which", return_value=None), \
+             mock.patch("revertly.notify.sys.platform", "darwin"), \
+             mock.patch("revertly.notify.os.path.exists", return_value=False), \
              mock.patch("revertly.notify.subprocess.Popen") as popen:
             os.environ.pop("REVERTLY_NO_NOTIFY", None)
-            notify.desktop("T", "B")           # nothing available -> no call
+            notify.desktop("T", "B")           # no osascript on disk -> no call
             popen.assert_not_called()
 
     def test_never_raises(self):
