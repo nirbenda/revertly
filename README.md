@@ -600,3 +600,12 @@ using or relying on this software. **Use it at your own risk.**
 
 Built by **Nir BenDavid** — [@nirbenda](https://github.com/nirbenda).
 Released under the [MIT License](LICENSE) — free, forever, for the local tool.
+
+---
+
+<div align="center">
+
+**If revertly saved you a bad afternoon — or looks like it might — [give it a ⭐](https://github.com/nirbenda/revertly).**<br>
+<sub>It's how other people find it. That's the whole marketing budget.</sub>
+
+</div>
