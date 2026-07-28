@@ -1,62 +1,87 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif">
   <defs>
-    <linearGradient id="g-mark" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="ad-mark" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#FFB54C"/><stop offset="1" stop-color="#FF5C6A"/></linearGradient>
+    <radialGradient id="ad-glow" cx="50%" cy="18%" r="70%">
+      <stop offset="0" stop-color="#FF9F1C" stop-opacity="0.16"/>
+      <stop offset="60%" stop-color="#FF5C6A" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#17130E" stop-opacity="0"/></radialGradient>
   </defs>
   <style>
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
     .fg{fill:#F4ECDF} .dim{fill:#A99C88} .grn{fill:#33D69F} .red{fill:#FF5C6A}
-    .yel{fill:#FFCF4D} .amb{fill:#FF9F1C} .b{font-weight:700}
+    .amb{fill:#FF9F1C} .yel{fill:#FFCF4D}
+    .head{font-size:34px;font-weight:800;letter-spacing:-.5px}
     .scene{opacity:0}
-    .sA{animation:sA 8s linear infinite} .sB{animation:sB 8s linear infinite} .sC{animation:sC 8s linear infinite}
-    @keyframes sA{0%,33%{opacity:1}36%,100%{opacity:0}}
-    @keyframes sB{0%,37%{opacity:0}40%,64%{opacity:1}67%,100%{opacity:0}}
-    @keyframes sC{0%,68%{opacity:0}71%,97%{opacity:1}99.9%,100%{opacity:0}}
+    .s1{animation:s1 10s linear infinite} .s2{animation:s2 10s linear infinite}
+    .s3{animation:s3 10s linear infinite} .s4{animation:s4 10s linear infinite}
+    @keyframes s1{0%,21%{opacity:1}24%,100%{opacity:0}}
+    @keyframes s2{0%,24%{opacity:0}27%,46%{opacity:1}49%,100%{opacity:0}}
+    @keyframes s3{0%,49%{opacity:0}52%,71%{opacity:1}74%,100%{opacity:0}}
+    @keyframes s4{0%,74%{opacity:0}77%,99%{opacity:1}99.9%,100%{opacity:0}}
+    .pulse{animation:pulse 1.1s ease-in-out infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
     .cur{animation:blink 1s steps(1) infinite}
     @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
-    @media (prefers-reduced-motion:reduce){.scene,.sA,.sB,.sC,.cur{animation:none!important}.sA{opacity:1!important}}
+    @media (prefers-reduced-motion:reduce){.scene,.s1,.s2,.s3,.s4,.pulse,.cur{animation:none!important}.s1{opacity:1!important}}
   </style>
 
-  <!-- window chrome -->
-  <rect x="2" y="2" width="856" height="356" rx="14" fill="#17130E" stroke="#34291D" stroke-width="1.5"/>
-  <circle cx="28" cy="26" r="6.5" fill="#ff5f57"/><circle cx="50" cy="26" r="6.5" fill="#febc2e"/><circle cx="72" cy="26" r="6.5" fill="#28c840"/>
-  <!-- brand mark + wordmark -->
-  <g transform="translate(372,15) scale(0.10)">
-    <rect x="20" y="20" width="200" height="200" rx="54" fill="url(#g-mark)"/>
-    <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
-    <polygon points="88,80 116,91 108,58" fill="#17130E"/>
-  </g>
-  <text x="398" y="31" class="fg b" font-size="14">revert<tspan class="amb">ly</tspan></text>
-  <line x1="2" y1="50" x2="858" y2="50" stroke="#34291D"/>
+  <rect x="0" y="0" width="900" height="500" fill="#17130E"/>
+  <rect x="0" y="0" width="900" height="500" fill="url(#ad-glow)"/>
 
-  <!-- Scene A: the agent goes rogue -->
-  <g class="scene sA">
-    <text x="26" y="86" class="dim" text-anchor="start">1 · your agent runs full speed — and goes off the rails</text>
-    <text x="26" y="128"><tspan class="grn b">$</tspan><tspan class="fg" x="46"> claude "refactor the parser"</tspan></text>
-    <text x="26" y="166"><tspan class="amb">●</tspan><tspan class="fg" x="46">Edit  src/parser.py</tspan></text>
-    <text x="26" y="196"><tspan class="amb">●</tspan><tspan class="fg" x="46">Write src/utils.py</tspan></text>
-    <text x="26" y="226"><tspan class="amb">●</tspan><tspan class="fg" x="46">Bash  rm README.md</tspan><tspan class="red" x="330">  ⟵ hallucinated "cleanup"</tspan></text>
-    <text x="26" y="272" class="grn">revertly: recorded 3 changes · nothing is permanent</text>
+  <!-- persistent brand watermark, top-left -->
+  <g transform="translate(40,34)">
+    <g transform="scale(0.115)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#ad-mark)"/>
+      <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
+      <polygon points="88,80 116,91 108,58" fill="#17130E"/></g>
+    <text x="34" y="20" class="fg" font-size="18" font-weight="700">revert<tspan class="amb">ly</tspan></text>
   </g>
 
-  <!-- Scene B: see exactly what happened -->
-  <g class="scene sB">
-    <text x="26" y="86" class="dim">2 · see exactly what it did — pre-image vs now</text>
-    <text x="26" y="128"><tspan class="grn b">$</tspan><tspan class="fg" x="46"> revertly diff</tspan></text>
-    <text x="26" y="164" class="amb">@@ src/parser.py @@</text>
-    <text x="26" y="192" class="red">-    return x.split(",")</text>
-    <text x="26" y="218" class="grn">+    return x.split(";")   # BUG the agent added</text>
-    <text x="26" y="252" class="red">-  README.md   (deleted)</text>
-    <text x="26" y="290" class="yel b">2 to restore, 1 to delete, 0 conflicts</text>
+  <!-- ───── Scene 1 · the fear ───── -->
+  <g class="scene s1">
+    <text x="450" y="146" text-anchor="middle" class="head fg">Your AI agent just wrecked your repo.</text>
+    <text x="450" y="204" text-anchor="middle" font-size="18"><tspan class="amb">one hallucination</tspan><tspan class="dim">  ·  </tspan><tspan class="amb">one rug-pulled MCP</tspan><tspan class="dim">  ·  </tspan><tspan class="amb">one prompt injection</tspan></text>
+    <g class="pulse">
+      <rect x="234" y="240" width="432" height="82" rx="14" fill="#2a1216" stroke="#FF5C6A" stroke-opacity=".55"/>
+      <text x="450" y="276" text-anchor="middle" class="red mono" font-size="20" font-weight="700">rm -rf .   ✗ 1,204 files gone</text>
+      <text x="450" y="302" text-anchor="middle" class="red mono" font-size="15">.env leaked  ·  ~/.ssh read</text>
+    </g>
+    <text x="450" y="382" text-anchor="middle" class="dim" font-size="19">No prompt. No warning. <tspan class="fg" font-weight="700">No undo.</tspan></text>
   </g>
 
-  <!-- Scene C: undo all of it -->
-  <g class="scene sC">
-    <text x="26" y="86" class="dim">3 · undo any of it — one command, itself reversible</text>
-    <text x="26" y="128"><tspan class="grn b">$</tspan><tspan class="fg" x="46"> revertly revert --yes</tspan></text>
-    <text x="26" y="166" class="grn"><tspan xml:space="preserve">  restore  src/parser.py</tspan></text>
-    <text x="26" y="194" class="grn"><tspan xml:space="preserve">  restore  README.md</tspan></text>
-    <text x="26" y="222" class="red"><tspan xml:space="preserve">  delete   src/utils.py</tspan></text>
-    <text x="26" y="262" class="grn b">reverted — your project is back. nothing was lost.</text>
-    <text x="26" y="298"><tspan class="grn b">$</tspan><tspan class="fg cur" x="46"> ▍</tspan></text>
+  <!-- ───── Scene 2 · caught ───── -->
+  <g class="scene s2">
+    <text x="450" y="150" text-anchor="middle" class="head fg">revertly <tspan class="amb">caught all of it.</tspan></text>
+    <g class="mono" font-size="19" text-anchor="start">
+      <text x="310" y="216"><tspan class="amb">●</tspan><tspan class="fg" dx="14">Edit    src/parser.py</tspan></text>
+      <text x="310" y="252"><tspan class="amb">●</tspan><tspan class="fg" dx="14">Write   src/config.yaml</tspan></text>
+      <text x="310" y="288"><tspan class="red">●</tspan><tspan class="fg" dx="14">Delete  1,204 files</tspan></text>
+    </g>
+    <text x="450" y="366" text-anchor="middle" class="dim" font-size="19">It snapshots your project <tspan class="fg" font-weight="700">before</tspan> the agent runs.</text>
+  </g>
+
+  <!-- ───── Scene 3 · undo ───── -->
+  <g class="scene s3">
+    <text x="450" y="150" text-anchor="middle" class="head fg">Undo all of it. <tspan class="amb">One command.</tspan></text>
+    <text x="450" y="222" text-anchor="middle" class="mono" font-size="20"><tspan class="grn">$</tspan><tspan class="fg"> revertly revert</tspan></text>
+    <rect x="150" y="262" width="600" height="66" rx="14" fill="#12281e" stroke="#33D69F" stroke-opacity=".5"/>
+    <text x="450" y="304" text-anchor="middle" class="grn mono" font-size="20" font-weight="700">✓ 1,204 files back — like it never happened.</text>
+    <text x="450" y="384" text-anchor="middle" class="dim" font-size="19">One file, one session, or the whole <tspan class="mono fg">rm -rf</tspan>.</text>
+  </g>
+
+  <!-- ───── Scene 4 · end card ───── -->
+  <g class="scene s4">
+    <g transform="translate(450,150)">
+      <g transform="translate(-118,-58) scale(0.44)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#ad-mark)"/>
+        <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
+        <polygon points="88,80 116,91 108,58" fill="#17130E"/></g>
+      <text x="20" y="14" class="fg" font-size="62" font-weight="800" letter-spacing="-2">revert<tspan class="amb">ly</tspan></text>
+    </g>
+    <text x="450" y="250" text-anchor="middle" class="fg" font-size="25" font-weight="700">Let the agent cook. Keep the undo button.</text>
+    <text x="450" y="284" text-anchor="middle" class="dim" font-size="17">Records everything · Reverts anything · Runs 100% local</text>
+    <g transform="translate(450,340)">
+      <rect x="-190" y="-25" width="380" height="50" rx="25" fill="#2A1E0A" stroke="#FF9F1C" stroke-opacity=".55"/>
+      <text x="0" y="6" text-anchor="middle" font-size="18" font-weight="700"><tspan class="fg">★ Free &amp; open source · </tspan><tspan class="amb">github.com/nirbenda/revertly</tspan></text>
+    </g>
   </g>
 </svg>
