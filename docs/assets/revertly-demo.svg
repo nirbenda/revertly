@@ -14,31 +14,41 @@
     .fg{fill:#F4ECDF} .dim{fill:#A99C88} .grn{fill:#33D69F} .red{fill:#FF5C6A} .amb{fill:#FF9F1C}
     .head{font-size:34px;font-weight:800;letter-spacing:-.5px}
     .scene{opacity:0}
-    .s1{animation:s1 11s ease-in-out infinite} .s2{animation:s2 11s ease-in-out infinite}
-    .s3{animation:s3 11s ease-in-out infinite} .s4{animation:s4 11s ease-in-out infinite}
-    @keyframes s1{0%,20%{opacity:1;transform:translateY(0)}24%,100%{opacity:0;transform:translateY(-28px)}}
-    @keyframes s2{0%,23%{opacity:0;transform:translateY(28px)}27%,45%{opacity:1;transform:translateY(0)}49%,100%{opacity:0;transform:translateY(-28px)}}
-    @keyframes s3{0%,48%{opacity:0;transform:translateY(28px)}52%,70%{opacity:1;transform:translateY(0)}74%,100%{opacity:0;transform:translateY(-28px)}}
-    @keyframes s4{0%,73%{opacity:0;transform:translateY(28px)}78%,99%{opacity:1;transform:translateY(0)}99.9%,100%{opacity:0}}
-    #drift{animation:drift 11s ease-in-out infinite}
-    @keyframes drift{0%,100%{opacity:.55;transform:translate(-60px,-6px)}50%{opacity:1;transform:translate(60px,14px)}}
-    .spin{transform-box:fill-box;transform-origin:center;animation:spin 11s cubic-bezier(.2,.8,.2,1) infinite}
-    @keyframes spin{0%,74%{transform:rotate(-340deg)}84%,100%{transform:rotate(0)}}
-    .pop{transform-box:fill-box;transform-origin:center;animation:pop 11s cubic-bezier(.2,1.3,.4,1) infinite}
-    @keyframes pop{0%,51%{transform:scale(.7)}56%{transform:scale(1.06)}60%,100%{transform:scale(1)}}
-    .shake{animation:shake 11s ease-in-out infinite}
+    .s1{animation:s1 12.5s ease-in-out infinite} .s2{animation:s2 12.5s ease-in-out infinite}
+    .s3{animation:s3 12.5s ease-in-out infinite} .s4{animation:s4 12.5s ease-in-out infinite}
+    .s5{animation:s5 12.5s ease-in-out infinite}
+    @keyframes s1{0%,19%{opacity:1;transform:translateY(0)}22%,100%{opacity:0;transform:translateY(-28px)}}
+    @keyframes s2{0%,20%{opacity:0;transform:translateY(28px)}25%,38%{opacity:1;transform:translateY(0)}41%,100%{opacity:0;transform:translateY(-28px)}}
+    @keyframes s3{0%,39%{opacity:0;transform:translateY(28px)}43%,55%{opacity:1;transform:translateY(0)}58%,100%{opacity:0;transform:translateY(-28px)}}
+    @keyframes s4{0%,56%{opacity:0;transform:translateY(18px)}60%,82%{opacity:1;transform:translateY(0)}85%,100%{opacity:0;transform:translateY(-18px)}}
+    @keyframes s5{0%,83%{opacity:0;transform:translateY(24px)}86%,99%{opacity:1;transform:translateY(0)}99.9%,100%{opacity:0}}
+    #drift{animation:drift 12.5s ease-in-out infinite}
+    @keyframes drift{0%,100%{opacity:.5;transform:translate(-60px,-6px)}50%{opacity:.9;transform:translate(60px,14px)}}
+    /* climax: the undo button */
+    .btnface{transform-box:fill-box;transform-origin:center;animation:press 12.5s ease-in-out infinite}
+    @keyframes press{0%,61%{transform:translateY(0)}63%{transform:translateY(7px)}67%{transform:translateY(7px)}70%{transform:translateY(-1px)}72%,100%{transform:translateY(0)}}
+    .rewind{transform-box:fill-box;transform-origin:center;animation:rewind 12.5s cubic-bezier(.2,.8,.2,1) infinite}
+    @keyframes rewind{0%,62%{transform:rotate(0)}70%{transform:rotate(-340deg)}72%,100%{transform:rotate(-360deg)}}
+    .ripple{transform-box:fill-box;transform-origin:center;animation:ripple 12.5s ease-out infinite;opacity:0}
+    @keyframes ripple{0%,62%{opacity:0;transform:scale(.55)}63%{opacity:.85;transform:scale(.72)}70%{opacity:0;transform:scale(1.95)}100%{opacity:0;transform:scale(1.95)}}
+    .zflash{animation:zflash 12.5s ease-out infinite}
+    @keyframes zflash{0%,62%{opacity:.55}63%{opacity:1}67%{opacity:.55}100%{opacity:.55}}
+    .cline{opacity:0;animation:cline 12.5s ease-out infinite}
+    @keyframes cline{0%,64%{opacity:0;transform:translateY(10px)}68%,82%{opacity:1;transform:translateY(0)}85%,100%{opacity:0}}
+    .pulse{animation:pulse 1.1s ease-in-out infinite}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .shake{animation:shake 12.5s ease-in-out infinite}
     @keyframes shake{0%,3%{transform:translateX(0)}4%{transform:translateX(-5px)}5%{transform:translateX(5px)}6%{transform:translateX(-3px)}7%,100%{transform:translateX(0)}}
-    .pulse{animation:pulse 1.1s ease-in-out infinite}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-    .cur{animation:blink 1s steps(1) infinite}@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
-    @media (prefers-reduced-motion:reduce){*{animation:none!important}.s1{opacity:1!important}}
+    @media (prefers-reduced-motion:reduce){
+      *{animation:none!important}.scene{opacity:0!important}
+      .s4{opacity:1!important;transform:none!important}
+      .btnface,.cline{transform:none!important;opacity:1!important}
+      .rewind{transform:rotate(0)!important}.ripple{opacity:0!important}}
   </style>
 
   <rect x="0" y="0" width="900" height="500" fill="#17130E"/>
   <rect x="0" y="0" width="900" height="500" fill="url(#dots)"/>
   <ellipse id="drift" cx="450" cy="150" rx="440" ry="260" fill="url(#blob)"/>
 
-  <!-- persistent brand watermark -->
   <g transform="translate(40,34)">
     <g transform="scale(0.115)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#mk)"/>
       <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
@@ -46,7 +56,7 @@
     <text x="34" y="20" class="fg" font-size="18" font-weight="700">revert<tspan class="amb">ly</tspan></text>
   </g>
 
-  <!-- Scene 1 · the problem -->
+  <!-- Beat 1 · the wound -->
   <g class="scene s1">
     <text x="450" y="146" text-anchor="middle" class="head fg">Your AI agent just wrecked your repo.</text>
     <text x="450" y="204" text-anchor="middle" font-size="18"><tspan class="amb">one hallucination</tspan><tspan class="dim">  ·  </tspan><tspan class="amb">one rug-pulled MCP</tspan><tspan class="dim">  ·  </tspan><tspan class="amb">one prompt injection</tspan></text>
@@ -58,7 +68,7 @@
     <text x="450" y="382" text-anchor="middle" class="dim" font-size="19">No prompt. No warning. <tspan class="fg" font-weight="700">No undo.</tspan></text>
   </g>
 
-  <!-- Scene 2 · caught -->
+  <!-- Beat 2 · the catch -->
   <g class="scene s2">
     <text x="450" y="150" text-anchor="middle" class="head fg">revertly <tspan class="amb">caught all of it.</tspan></text>
     <g class="mono" font-size="19" text-anchor="start">
@@ -69,29 +79,45 @@
     <text x="450" y="366" text-anchor="middle" class="dim" font-size="19">It snapshots your project <tspan class="fg" font-weight="700">before</tspan> the agent runs.</text>
   </g>
 
-  <!-- Scene 3 · undo -->
+  <!-- Beat 3 · the command -->
   <g class="scene s3">
     <text x="450" y="150" text-anchor="middle" class="head fg">Undo all of it. <tspan class="amb">One command.</tspan></text>
     <text x="450" y="222" text-anchor="middle" class="mono" font-size="20"><tspan class="grn">$</tspan><tspan class="fg"> revertly revert</tspan></text>
-    <g class="pop">
-      <rect x="150" y="262" width="600" height="66" rx="14" fill="#12281e" stroke="#33D69F" stroke-opacity=".5"/>
-      <text x="450" y="304" text-anchor="middle" class="grn mono" font-size="20" font-weight="700">✓ 1,204 files back — like it never happened.</text>
-    </g>
+    <rect x="150" y="262" width="600" height="66" rx="14" fill="#12281e" stroke="#33D69F" stroke-opacity=".5"/>
+    <text x="450" y="304" text-anchor="middle" class="grn mono" font-size="20" font-weight="700">✓ 1,204 files back — like it never happened.</text>
     <text x="450" y="384" text-anchor="middle" class="dim" font-size="19">One file, one session, or the whole <tspan class="mono fg">rm -rf</tspan>.</text>
   </g>
 
-  <!-- Scene 4 · end card -->
+  <!-- Beat 4 · THE CLIMAX — press the undo button -->
   <g class="scene s4">
-    <g transform="translate(372,150)">
-      <g class="spin"><g transform="translate(-118,-58) scale(0.44)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#mk)"/>
+    <circle class="ripple" cx="450" cy="196" r="82" fill="none" stroke="#33D69F" stroke-width="4"/>
+    <rect x="392" y="144" width="116" height="116" rx="32" fill="#7a2e12"/>
+    <g class="btnface">
+      <rect x="392" y="138" width="116" height="116" rx="32" fill="url(#mk)"/>
+      <g transform="translate(450,196)"><g class="rewind"><g transform="translate(-70,-68) scale(0.60)">
         <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
-        <polygon points="88,80 116,91 108,58" fill="#17130E"/></g></g>
+        <polygon points="88,80 116,91 108,58" fill="#17130E"/></g></g></g>
+    </g>
+    <g class="zflash">
+      <rect x="410" y="286" width="80" height="34" rx="9" fill="#241c12" stroke="#F4ECDF" stroke-opacity=".25"/>
+      <text x="450" y="309" text-anchor="middle" class="fg mono" font-size="16" font-weight="700">⌘Z</text>
+    </g>
+    <g class="cline">
+      <text x="450" y="366" text-anchor="middle" class="fg" font-size="33" font-weight="800" letter-spacing="-.6">Let the agent cook.</text>
+      <text x="450" y="408" text-anchor="middle" font-size="33" font-weight="800" letter-spacing="-.6"><tspan class="fg">Keep the </tspan><tspan class="amb">undo button.</tspan></text>
+    </g>
+  </g>
+
+  <!-- Beat 5 · end card, stripped -->
+  <g class="scene s5">
+    <g transform="translate(372,182)">
+      <g transform="translate(-118,-58) scale(0.44)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#mk)"/>
+        <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
+        <polygon points="88,80 116,91 108,58" fill="#17130E"/></g>
       <text x="18" y="14" class="fg" font-size="62" font-weight="800" letter-spacing="-2">revert<tspan class="amb">ly</tspan></text>
     </g>
-    <text x="450" y="252" text-anchor="middle" class="fg" font-size="25" font-weight="700">Let the agent cook. Keep the undo button.</text>
-    <text x="450" y="290" text-anchor="middle" class="dim" font-size="17">Records everything · Reverts anything · Runs 100% local</text>
-    <text x="450" y="326" text-anchor="middle" class="dim" font-size="15">Free &amp; open source · MIT · macOS + Linux · zero deps</text>
-    <g transform="translate(450,388)">
+    <text x="450" y="300" text-anchor="middle" class="dim" font-size="16">Records everything · Reverts anything · Runs 100% local · MIT</text>
+    <g transform="translate(450,362)">
       <rect x="-208" y="-25" width="416" height="50" rx="25" fill="#2A1E0A" stroke="#FF9F1C" stroke-opacity=".6"/>
       <text x="0" y="6" text-anchor="middle" font-size="19" font-weight="700"><tspan class="fg">★  </tspan><tspan class="amb">github.com/nirbenda/revertly</tspan></text>
     </g>
