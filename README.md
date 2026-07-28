@@ -581,6 +581,18 @@ session, cli, ui, and hardening. TDD throughout.
 | [`TECH-DESIGN.md`](TECH-DESIGN.md) | Architecture, invariants, module map |
 | [`THREAT-MODEL.md`](THREAT-MODEL.md) | Adversary tiers, attack trees, implemented-vs-roadmap matrix |
 
+## Disclaimer
+
+revertly is **experimental software, provided "as is," with no warranty of any
+kind** — see the [MIT License](LICENSE). It is a **best-effort safety net, not a
+guarantee**: it can fail to record, revert, or detect a change, and its recovery
+depends on snapshots and clones that may be skipped, pruned, or defeated by a
+determined same-user process (see [`THREAT-MODEL.md`](THREAT-MODEL.md)). **It is
+not a backup** — keep independent backups of anything you can't afford to lose.
+To the maximum extent permitted by law, the author is **not liable** for any
+data loss, corruption, downtime, security incident, or other damage arising from
+using or relying on this software. **Use it at your own risk.**
+
 ## Author & license
 
 Built by **Nir BenDavid** — [@nirbenda](https://github.com/nirbenda).
