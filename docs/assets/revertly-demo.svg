@@ -1,55 +1,64 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Roboto, sans-serif">
   <defs>
-    <linearGradient id="ad-mark" x1="0" y1="0" x2="1" y2="1">
+    <linearGradient id="mk" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#FFB54C"/><stop offset="1" stop-color="#FF5C6A"/></linearGradient>
-    <radialGradient id="ad-glow" cx="50%" cy="18%" r="70%">
-      <stop offset="0" stop-color="#FF9F1C" stop-opacity="0.16"/>
-      <stop offset="60%" stop-color="#FF5C6A" stop-opacity="0.04"/>
-      <stop offset="100%" stop-color="#17130E" stop-opacity="0"/></radialGradient>
+    <radialGradient id="blob" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#FF9F1C" stop-opacity="0.20"/>
+      <stop offset="55%" stop-color="#FF5C6A" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#FF9F1C" stop-opacity="0"/></radialGradient>
+    <pattern id="dots" width="30" height="30" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.3" fill="#241c12"/></pattern>
   </defs>
   <style>
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-    .fg{fill:#F4ECDF} .dim{fill:#A99C88} .grn{fill:#33D69F} .red{fill:#FF5C6A}
-    .amb{fill:#FF9F1C} .yel{fill:#FFCF4D}
+    .fg{fill:#F4ECDF} .dim{fill:#A99C88} .grn{fill:#33D69F} .red{fill:#FF5C6A} .amb{fill:#FF9F1C}
     .head{font-size:34px;font-weight:800;letter-spacing:-.5px}
     .scene{opacity:0}
-    .s1{animation:s1 10s linear infinite} .s2{animation:s2 10s linear infinite}
-    .s3{animation:s3 10s linear infinite} .s4{animation:s4 10s linear infinite}
-    @keyframes s1{0%,21%{opacity:1}24%,100%{opacity:0}}
-    @keyframes s2{0%,24%{opacity:0}27%,46%{opacity:1}49%,100%{opacity:0}}
-    @keyframes s3{0%,49%{opacity:0}52%,71%{opacity:1}74%,100%{opacity:0}}
-    @keyframes s4{0%,74%{opacity:0}77%,99%{opacity:1}99.9%,100%{opacity:0}}
+    .s1{animation:s1 11s ease-in-out infinite} .s2{animation:s2 11s ease-in-out infinite}
+    .s3{animation:s3 11s ease-in-out infinite} .s4{animation:s4 11s ease-in-out infinite}
+    @keyframes s1{0%,20%{opacity:1;transform:translateY(0)}24%,100%{opacity:0;transform:translateY(-28px)}}
+    @keyframes s2{0%,23%{opacity:0;transform:translateY(28px)}27%,45%{opacity:1;transform:translateY(0)}49%,100%{opacity:0;transform:translateY(-28px)}}
+    @keyframes s3{0%,48%{opacity:0;transform:translateY(28px)}52%,70%{opacity:1;transform:translateY(0)}74%,100%{opacity:0;transform:translateY(-28px)}}
+    @keyframes s4{0%,73%{opacity:0;transform:translateY(28px)}78%,99%{opacity:1;transform:translateY(0)}99.9%,100%{opacity:0}}
+    #drift{animation:drift 11s ease-in-out infinite}
+    @keyframes drift{0%,100%{opacity:.55;transform:translate(-60px,-6px)}50%{opacity:1;transform:translate(60px,14px)}}
+    .spin{transform-box:fill-box;transform-origin:center;animation:spin 11s cubic-bezier(.2,.8,.2,1) infinite}
+    @keyframes spin{0%,74%{transform:rotate(-340deg)}84%,100%{transform:rotate(0)}}
+    .pop{transform-box:fill-box;transform-origin:center;animation:pop 11s cubic-bezier(.2,1.3,.4,1) infinite}
+    @keyframes pop{0%,51%{transform:scale(.7)}56%{transform:scale(1.06)}60%,100%{transform:scale(1)}}
+    .shake{animation:shake 11s ease-in-out infinite}
+    @keyframes shake{0%,3%{transform:translateX(0)}4%{transform:translateX(-5px)}5%{transform:translateX(5px)}6%{transform:translateX(-3px)}7%,100%{transform:translateX(0)}}
     .pulse{animation:pulse 1.1s ease-in-out infinite}
-    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
-    .cur{animation:blink 1s steps(1) infinite}
-    @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
-    @media (prefers-reduced-motion:reduce){.scene,.s1,.s2,.s3,.s4,.pulse,.cur{animation:none!important}.s1{opacity:1!important}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+    .cur{animation:blink 1s steps(1) infinite}@keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+    @media (prefers-reduced-motion:reduce){*{animation:none!important}.s1{opacity:1!important}}
   </style>
 
   <rect x="0" y="0" width="900" height="500" fill="#17130E"/>
-  <rect x="0" y="0" width="900" height="500" fill="url(#ad-glow)"/>
+  <rect x="0" y="0" width="900" height="500" fill="url(#dots)"/>
+  <ellipse id="drift" cx="450" cy="150" rx="440" ry="260" fill="url(#blob)"/>
 
-  <!-- persistent brand watermark, top-left -->
+  <!-- persistent brand watermark -->
   <g transform="translate(40,34)">
-    <g transform="scale(0.115)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#ad-mark)"/>
+    <g transform="scale(0.115)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#mk)"/>
       <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
       <polygon points="88,80 116,91 108,58" fill="#17130E"/></g>
     <text x="34" y="20" class="fg" font-size="18" font-weight="700">revert<tspan class="amb">ly</tspan></text>
   </g>
 
-  <!-- ───── Scene 1 · the fear ───── -->
+  <!-- Scene 1 · the problem -->
   <g class="scene s1">
     <text x="450" y="146" text-anchor="middle" class="head fg">Your AI agent just wrecked your repo.</text>
     <text x="450" y="204" text-anchor="middle" font-size="18"><tspan class="amb">one hallucination</tspan><tspan class="dim">  ·  </tspan><tspan class="amb">one rug-pulled MCP</tspan><tspan class="dim">  ·  </tspan><tspan class="amb">one prompt injection</tspan></text>
-    <g class="pulse">
+    <g class="shake"><g class="pulse">
       <rect x="234" y="240" width="432" height="82" rx="14" fill="#2a1216" stroke="#FF5C6A" stroke-opacity=".55"/>
       <text x="450" y="276" text-anchor="middle" class="red mono" font-size="20" font-weight="700">rm -rf .   ✗ 1,204 files gone</text>
       <text x="450" y="302" text-anchor="middle" class="red mono" font-size="15">.env leaked  ·  ~/.ssh read</text>
-    </g>
+    </g></g>
     <text x="450" y="382" text-anchor="middle" class="dim" font-size="19">No prompt. No warning. <tspan class="fg" font-weight="700">No undo.</tspan></text>
   </g>
 
-  <!-- ───── Scene 2 · caught ───── -->
+  <!-- Scene 2 · caught -->
   <g class="scene s2">
     <text x="450" y="150" text-anchor="middle" class="head fg">revertly <tspan class="amb">caught all of it.</tspan></text>
     <g class="mono" font-size="19" text-anchor="start">
@@ -60,21 +69,23 @@
     <text x="450" y="366" text-anchor="middle" class="dim" font-size="19">It snapshots your project <tspan class="fg" font-weight="700">before</tspan> the agent runs.</text>
   </g>
 
-  <!-- ───── Scene 3 · undo ───── -->
+  <!-- Scene 3 · undo -->
   <g class="scene s3">
     <text x="450" y="150" text-anchor="middle" class="head fg">Undo all of it. <tspan class="amb">One command.</tspan></text>
     <text x="450" y="222" text-anchor="middle" class="mono" font-size="20"><tspan class="grn">$</tspan><tspan class="fg"> revertly revert</tspan></text>
-    <rect x="150" y="262" width="600" height="66" rx="14" fill="#12281e" stroke="#33D69F" stroke-opacity=".5"/>
-    <text x="450" y="304" text-anchor="middle" class="grn mono" font-size="20" font-weight="700">✓ 1,204 files back — like it never happened.</text>
+    <g class="pop">
+      <rect x="150" y="262" width="600" height="66" rx="14" fill="#12281e" stroke="#33D69F" stroke-opacity=".5"/>
+      <text x="450" y="304" text-anchor="middle" class="grn mono" font-size="20" font-weight="700">✓ 1,204 files back — like it never happened.</text>
+    </g>
     <text x="450" y="384" text-anchor="middle" class="dim" font-size="19">One file, one session, or the whole <tspan class="mono fg">rm -rf</tspan>.</text>
   </g>
 
-  <!-- ───── Scene 4 · end card ───── -->
+  <!-- Scene 4 · end card -->
   <g class="scene s4">
     <g transform="translate(372,150)">
-      <g transform="translate(-118,-58) scale(0.44)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#ad-mark)"/>
+      <g class="spin"><g transform="translate(-118,-58) scale(0.44)"><rect x="20" y="20" width="200" height="200" rx="54" fill="url(#mk)"/>
         <g fill="none" stroke="#17130E" stroke-width="22" stroke-linecap="round"><path d="M77 104 A46 46 0 1 0 112 75"/></g>
-        <polygon points="88,80 116,91 108,58" fill="#17130E"/></g>
+        <polygon points="88,80 116,91 108,58" fill="#17130E"/></g></g>
       <text x="18" y="14" class="fg" font-size="62" font-weight="800" letter-spacing="-2">revert<tspan class="amb">ly</tspan></text>
     </g>
     <text x="450" y="252" text-anchor="middle" class="fg" font-size="25" font-weight="700">Let the agent cook. Keep the undo button.</text>
