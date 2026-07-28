@@ -159,15 +159,17 @@ only inside a tool — it's all plain files under `~/.revertly`.
 ## Install
 
 <details>
-<summary><b>⚠️ Phase 1 — experimental. Read this before you deploy.</b></summary>
+<summary><b>What it does — and doesn't — do (yet).</b> <i>Worth 20 seconds before you rely on it.</i></summary>
 
 <br>
 
-revertly is a developer safety net that's **tamper-evident, not tamper-proof**:
-a same-UID or hijacked agent is made *loud and logged*, not *stopped* (see
-[`THREAT-MODEL.md`](THREAT-MODEL.md)). It's local and single-machine — not yet a
-managed/fleet security control. Try it, break it, tell us — but don't make it
-your only guardrail.
+revertly is early (Phase 1) and deliberately honest about its edges — which, for
+a *safety* tool, is the point. It's **tamper-evident, not tamper-proof**: a
+hijacked, same-user agent is made **loud, logged, and reversible**, not *blocked*
+(that's the design — see [`THREAT-MODEL.md`](THREAT-MODEL.md) for the full threat
+model and the kernel-level Phase-2 plan). It's local and single-machine today,
+not a fleet control. Keep your normal backups — revertly is the **fast undo
+layer on top**, not a replacement for them.
 
 </details>
 
