@@ -575,3 +575,8 @@ session, cli, ui, and hardening. TDD throughout.
 | [`DESIGN.md`](DESIGN.md) | Design principles and product thinking |
 | [`TECH-DESIGN.md`](TECH-DESIGN.md) | Architecture, invariants, module map |
 | [`THREAT-MODEL.md`](THREAT-MODEL.md) | Adversary tiers, attack trees, implemented-vs-roadmap matrix |
+
+## Author & license
+
+Built by **Nir BenDavid** — [@nirbenda](https://github.com/nirbenda).
+Released under the [MIT License](LICENSE) — free, forever, for the local tool.
