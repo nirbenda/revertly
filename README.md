@@ -35,12 +35,12 @@ git clone https://github.com/nirbenda/revertly && cd revertly && ./install.sh
 ```
 
 <p align="center">
-  <img src="docs/assets/demo.svg" width="880" alt="Animated demo: an agent session breaks the parser and deletes README.md; revertly diff shows exactly what changed; revertly revert restores everything.">
-  <br><sub>↑ real output from a real session — only the paths were shortened.</sub>
+  <img src="docs/assets/revertly-demo.svg" width="820" alt="Animated explainer: an AI agent wrecks your repo — a hallucination, a rug-pulled MCP tool, or a prompt injection deletes 1,204 files and leaks secrets; revertly caught it all from a snapshot taken before the agent ran; one command puts everything back, like it never happened.">
+  <br><sub>↑ the 15-second version. (<a href="docs/assets/revertly-demo.gif">GIF</a> for sharing)</sub>
 </p>
 
 <p align="center">
-  <img src="docs/assets/panel.png" width="880" alt="revertly control panel — a local dashboard with a sidebar (Timeline, Find, Diff, Revert, Security, Storage, Live) and a session's event stream: writes, a rename and a delete, with the rm command and a ~/.ssh read flagged in red.">
+  <img src="docs/assets/panel.png" width="820" alt="revertly control panel — a local dashboard with a sidebar (Timeline, Find, Diff, Revert, Security, Storage, Live) and a session's event stream: writes, a rename and a delete, with the rm command and a ~/.ssh read flagged in red.">
   <br><sub>↑ …or point and click. <code>revertly ui</code> — a local control panel for the same thing.</sub>
 </p>
 
@@ -205,6 +205,11 @@ revertly revert --dry-run        # preview the undo — changes nothing
 revertly revert                  # undo the session (asks first; non-destructive)
 revertly ui                      # visual control panel: timeline / diff / revert / live
 ```
+
+<p align="center">
+  <img src="docs/assets/demo.svg" width="820" alt="Animated demo of real CLI output: an agent session breaks the parser and deletes README.md; revertly diff shows exactly what changed; revertly revert restores everything.">
+  <br><sub>↑ real output from a real session — only the paths were shortened.</sub>
+</p>
 
 Escape hatches, any time:
 
