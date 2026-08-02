@@ -59,11 +59,12 @@ speed, with no cage — and nothing it does can be permanent or invisible.
   your shell rc — you get a desktop notification *while it happens*, not a
   forensic surprise weeks later.
 
-> **"But I already have git."** Git saves what *you* deliberately commit.
-> revertly saves you from what the *agent* does **between** commits — to
-> untracked and `.gitignore`d files, before you staged anything, and outside the
-> repo entirely — plus it *alerts* on secret reads and dangerous commands, which
-> git never does. They're complementary: use both. ([more in the FAQ ↓](#faq))
+> **"But I already have git."** git is the history you *intend* — revertly is the
+> mess the agent *didn't*. git only has what **you committed**; revertly captures
+> what the agent does **between** commits, automatically: untracked and
+> `.gitignore`d files, the file it deleted before you staged anything, changes
+> *outside* the repo — plus live *alerts* on secret reads and dangerous commands
+> git never sees. Complementary — use both. ([more in the FAQ ↓](#faq))
 
 |                                   | 🧱 Sandbox / container | 🟠 **revertly** | 🕳️ Nothing (just YOLO) |
 | --------------------------------- | :--------------------: | :-------------: | :---------------------: |
@@ -465,7 +466,8 @@ guard shims `exec` straight into the real binaries — there's nothing in the
 file-I/O path.
 
 **I already use git — why do I need this?**
-Because git protects what *you deliberately commit*, and an AI agent's damage
+**git is the history you *intend*; revertly is the damage the agent *didn't*.**
+git only protects what *you deliberately commit* — and an AI agent's damage
 happens everywhere git isn't looking:
 
 - **Between commits.** The agent edits, runs, and deletes for an hour before you
@@ -483,8 +485,7 @@ happens everywhere git isn't looking:
   `~/.ssh/id_rsa` or piped `curl | sh`. revertly alerts on that live.
 
 And it **doesn't touch your git state** — no stray commits, no stash, no reflog
-spelunking. In one line: **git is for the history *you* intend; revertly is for
-the damage the *agent* didn't.** Use both.
+spelunking. **Use both.**
 
 **How much disk does it use?**
 Almost none at first: clones share blocks with the originals. Bytes become real
