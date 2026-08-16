@@ -171,6 +171,16 @@ def uninstall(purge: bool = False, profile: bool = True) -> dict:
     return result
 
 
+# Args that only PRINT and cannot mutate the workspace. `claude --version` must
+# behave like a cheap version query, not trigger a full pre-agent snapshot — so
+# scripts, health checks, and shell completion don't accidentally arm revertly.
+_INFO_ARGS = {"--version", "-V", "--help", "-h"}
+
+
+def _is_informational(args: List[str]) -> bool:
+    return bool(args) and all(a in _INFO_ARGS for a in args)
+
+
 def run_wrapped(cmd: List[str]) -> int:
     # argparse REMAINDER may include a leading '--'
     if cmd and cmd[0] == "--":
@@ -178,6 +188,14 @@ def run_wrapped(cmd: List[str]) -> int:
     if not cmd:
         print("revertly shim: no command given", file=sys.stderr)
         return 2
+
+    # informational-only invocations (--version/--help) never snapshot: run the
+    # real command transparently (no arming, no stderr noise for tooling).
+    if _is_informational(cmd[1:]):
+        try:
+            return subprocess.call(cmd)
+        except KeyboardInterrupt:
+            return 130
 
     # escape hatches — logged, so bypassing the net is never fully silent
     if os.environ.get("REVERTLY_DISABLE"):
@@ -190,10 +208,28 @@ def run_wrapped(cmd: List[str]) -> int:
         return _exec_unprotected(cmd, reason="revertly is paused")
 
     cfg = load_config(paths.config_path())
+    if os.environ.get("REVERTLY_ALLOW_BROAD"):
+        cfg.allow_broad_snapshot = True
     cwd = os.getcwd()
+    sess = Session(cwd=cwd, argv=cmd, cfg=cfg)
+
+    # Snapshot-scope safety: refuse to clone an unbounded root ($HOME, /, or a
+    # tree with millions of files). Cloning $HOME has caused full macOS freezes
+    # (EDR/Spotlight inspecting a filesystem-event storm). Fail-safe: skip the
+    # snapshot and run the agent UNPROTECTED, loudly, rather than hang the box.
+    try:
+        block = sess.snapshot_block_reason()
+    except Exception:
+        block = None   # our check must never itself break the launch
+    if block:
+        paths.append_incident("SKIP-ARM", f"not snapshotting: {block}")
+        print(f"revertly ⚠ not snapshotting — {block}.\n"
+              f"       Running {cmd[0]} UNPROTECTED. cd into a project directory, "
+              f"or set REVERTLY_ALLOW_BROAD=1 to snapshot this tree anyway.",
+              file=sys.stderr)
+        return _exec_unprotected(cmd, reason="broad/oversized snapshot root")
 
     try:
-        sess = Session(cwd=cwd, argv=cmd, cfg=cfg)
         sess.arm()
     except ArmError as e:
         policy = getattr(e, "policy", "abort")

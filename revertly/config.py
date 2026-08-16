@@ -73,6 +73,15 @@ class Config:
     delete_burst: str = "alert"          # alert | off
     delete_burst_threshold: int = 25     # deletes within the window to trip
     delete_burst_window: float = 3.0     # seconds
+    # snapshot-scope safety: refuse to snapshot an obviously-too-broad root
+    # ($HOME, /, an ancestor of $HOME) or a tree with more than
+    # max_snapshot_entries kept files. Cloning $HOME pulls in Library/, caches,
+    # and cloud-synced dirs — millions of files — and on macOS with EDR/Spotlight
+    # inspecting each op that has caused full system freezes. When tripped,
+    # revertly runs the agent UNPROTECTED (fail-safe) rather than snapshot.
+    # Override a specific broad run with REVERTLY_ALLOW_BROAD=1.
+    allow_broad_snapshot: bool = False   # True = skip the broad-root refusal
+    max_snapshot_entries: int = 50000    # 0 = no entry-count limit
 
     # ---- glob helpers (operate on absolute, expanded paths) ----
 
@@ -272,6 +281,8 @@ def _apply(cfg: Config, section, key, val):
         ("watch", "poll_interval"): "poll_interval",
         ("guard", "mode"): "guard_mode",
         ("guard", "delete_burst"): "delete_burst",
+        ("safety", "allow_broad_snapshot"): "allow_broad_snapshot",
+        ("safety", "max_snapshot_entries"): "max_snapshot_entries",
     }
     attr = mapping.get((section, key))
     if attr:

@@ -26,6 +26,48 @@ class ArmError(RuntimeError):
         self.policy = policy
 
 
+def _broad_root_reason(cwd: str) -> Optional[str]:
+    """Return a human reason if `cwd` is a root too broad to snapshot safely
+    ($HOME, a filesystem root, or an ancestor of $HOME like /Users), else None.
+
+    Cloning such a root pulls in ~/Library, caches, and cloud-synced trees —
+    potentially millions of files — and on macOS with EDR/Spotlight inspecting
+    each filesystem op that has caused complete system freezes. Pure + cheap
+    (path math only, no traversal) so it can gate arming before any clone."""
+    try:
+        cwd_r = os.path.realpath(cwd)
+        home = os.path.realpath(os.path.expanduser("~"))
+    except OSError:
+        return None
+    if cwd_r == home:
+        return f"{cwd} is your home directory"
+    # filesystem root ("/" or a mount point whose parent is itself)
+    if cwd_r == os.path.sep or os.path.dirname(cwd_r) == cwd_r:
+        return f"{cwd} is a filesystem root"
+    # an ancestor of $HOME (e.g. /Users, /home) — even broader than home
+    if home == cwd_r or home.startswith(cwd_r.rstrip(os.sep) + os.sep):
+        return f"{cwd} contains your home directory"
+    return None
+
+
+def _entry_count_exceeds(root: str, limit: int, is_excluded=None) -> bool:
+    """True if `root` holds more than `limit` kept entries. Prunes excluded
+    dirs (so a normal project with node_modules isn't falsely flagged) and
+    STOPS as soon as the limit is passed, so it never fully traverses a giant
+    tree — the check itself stays cheap even when the answer is 'too big'."""
+    if not limit or limit <= 0:
+        return False
+    count = 0
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+        if is_excluded is not None:
+            dirnames[:] = [d for d in dirnames
+                           if not is_excluded(os.path.join(dirpath, d))]
+        count += len(dirnames) + len(filenames)
+        if count > limit:
+            return True
+    return False
+
+
 # Directories whose deletion is normal, high-volume, and regeneratable — we
 # still journal (and can revert) them, but they must NOT count toward a
 # "runaway deletion" alarm, or `rm -rf dist` would cry wolf every build. Kept
@@ -128,6 +170,10 @@ class Session:
         try:
             if snapshotter.can_snapshot():
                 snap_name = snapshotter.create()
+            # Announce BEFORE the clone: on a large/non-CoW tree this blocks the
+            # agent's start, and without a line here `claude` looks hung.
+            import sys as _sys
+            print(f"revertly: snapshotting {self.cwd} …", file=_sys.stderr)
             t0 = time.time()
             cloner.clone_tree(self.cwd, paths.clone_dir(self.id))
             self._prune_clone(paths.clone_dir(self.id))
@@ -210,6 +256,23 @@ class Session:
             msg = "sensitive-path tripwires are EMPTY in config"
             print(f"revertly ⚠ {msg}", file=__import__("sys").stderr)
             paths.append_incident("CONFIG", msg)
+
+    def snapshot_block_reason(self) -> Optional[str]:
+        """Return a reason NOT to snapshot this cwd (too broad / too large), or
+        None if it's safe. Cheap: a broad-root check (path math only) first, then
+        a bounded entry count that stops at the limit. The shim uses this to skip
+        arming and run the agent UNPROTECTED rather than clone a giant tree —
+        preventing the $HOME-clone freeze. Bypassed by allow_broad_snapshot."""
+        if getattr(self.cfg, "allow_broad_snapshot", False):
+            return None
+        reason = _broad_root_reason(self.cwd)
+        if reason:
+            return reason
+        limit = getattr(self.cfg, "max_snapshot_entries", 0)
+        if _entry_count_exceeds(self.cwd, limit, self.cfg.is_excluded):
+            return (f"{self.cwd} has more than {limit:,} files — too large to "
+                    f"snapshot safely")
+        return None
 
     def _warn_no_cow(self) -> None:
         """This filesystem has no copy-on-write, so the pre-image is a full byte

@@ -157,6 +157,71 @@ class TestShimBypassLogged(SessionBase):
         self.assertNotIn('if [ -n "$REVERTLY_DISABLE" ]; then exec', script)
 
 
+class TestShimInformational(SessionBase):
+    def test_version_does_not_arm(self):
+        # `claude --version` must be a cheap passthrough: no snapshot/clone.
+        from unittest import mock
+        from revertly import shim
+        with mock.patch("revertly.session.Session.arm") as arm, \
+             mock.patch("subprocess.call", return_value=0) as call:
+            rc = shim.run_wrapped(["--", "claude", "--version"])
+        self.assertEqual(rc, 0)
+        arm.assert_not_called()          # never armed
+        call.assert_called_once()        # real command ran
+
+    def test_help_does_not_arm(self):
+        from unittest import mock
+        from revertly import shim
+        with mock.patch("revertly.session.Session.arm") as arm, \
+             mock.patch("subprocess.call", return_value=0):
+            shim.run_wrapped(["--", "claude", "--help"])
+        arm.assert_not_called()
+
+    def test_real_run_still_arms(self):
+        # a normal invocation (no info flag) must still arm.
+        from unittest import mock
+        from revertly import shim
+        with mock.patch.dict(os.environ, {"REVERTLY_GUARD_DISABLE": "1"}), \
+             mock.patch("revertly.session.Session.snapshot_block_reason",
+                        return_value=None), \
+             mock.patch("revertly.session.Session.arm") as arm, \
+             mock.patch("revertly.shim.Session.seal"), \
+             mock.patch("subprocess.call", return_value=0):
+            shim.run_wrapped(["--", "claude", "-p", "do a thing"])
+        arm.assert_called_once()
+
+
+class TestShimBroadRootSkipsArm(SessionBase):
+    def test_broad_root_runs_unprotected_without_arming(self):
+        # snapshot_block_reason -> reason means DON'T clone (freeze risk); run
+        # the agent unprotected and log SKIP-ARM, never call arm().
+        from unittest import mock
+        from revertly import shim
+        with mock.patch("revertly.session.Session.snapshot_block_reason",
+                        return_value="$HOME is your home directory"), \
+             mock.patch("revertly.session.Session.arm") as arm, \
+             mock.patch("revertly.shim._exec_unprotected", return_value=0) as ex:
+            rc = shim.run_wrapped(["--", "claude", "-p", "hi"])
+        self.assertEqual(rc, 0)
+        arm.assert_not_called()          # never cloned
+        ex.assert_called_once()          # ran unprotected
+        with open(paths.incidents_log()) as f:
+            self.assertIn("SKIP-ARM", f.read())
+
+    def test_allow_broad_env_lets_it_arm(self):
+        from unittest import mock
+        from revertly import shim
+        with mock.patch.dict(os.environ, {"REVERTLY_ALLOW_BROAD": "1",
+                                          "REVERTLY_GUARD_DISABLE": "1"}), \
+             mock.patch("revertly.session.Session.arm") as arm, \
+             mock.patch("revertly.shim.Session.seal"), \
+             mock.patch("subprocess.call", return_value=0):
+            # even if cwd were broad, the env override sets allow_broad_snapshot
+            # so the reason is None and arming proceeds.
+            shim.run_wrapped(["--", "claude", "-p", "hi"])
+        arm.assert_called_once()
+
+
 class TestEventEnrichment(SessionBase):
     def _emit_and_read(self, path, op):
         s = self._mk()
