@@ -48,6 +48,12 @@ class TestRetentionKeys(unittest.TestCase):
         self.assertEqual(cfg.retention_days, 7)
         self.assertEqual(cfg.max_disk_gb, 5.0)
 
+    def test_fallback_retention_default_and_alias(self):
+        # default is a shorter window for non-CoW (full-copy) filesystems
+        self.assertEqual(self._load('').fallback_retention_days, 7)
+        cfg = self._load('[retention]\nfallback_days = "2w"\n')
+        self.assertEqual(cfg.fallback_retention_days, 14)
+
     def test_natural_field_name_alias(self):
         cfg = self._load('[retention]\nretention_days = 14\n')
         self.assertEqual(cfg.retention_days, 14)

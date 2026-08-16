@@ -110,6 +110,7 @@ class Session:
         self._tripwire = TripwireEngine(self.cfg)
         self._burst = _BurstDetector(self.cfg, self._on_delete_burst, cwd=self.cwd)
         self.meta: Optional[SessionMeta] = None
+        self._cow = True   # set for real at arm; True = don't tighten retention
 
     # ─────────────────────── arm ───────────────────────
 
@@ -120,6 +121,7 @@ class Session:
 
         snapshotter = self._snapshotter or _default_snapshotter()
         cloner = self._cloner or _default_cloner()
+        self._cow = cloner.is_cow()
 
         snap_name = None
         clone_ok = False
@@ -130,6 +132,8 @@ class Session:
             cloner.clone_tree(self.cwd, paths.clone_dir(self.id))
             self._prune_clone(paths.clone_dir(self.id))
             clone_ok = True
+            if not self._cow:
+                self._warn_no_cow()
             dt = time.time() - t0
             if dt > 1.0:
                 # arming blocks the wrapped command's start; a slow clone means
@@ -206,6 +210,35 @@ class Session:
             msg = "sensitive-path tripwires are EMPTY in config"
             print(f"revertly ⚠ {msg}", file=__import__("sys").stderr)
             paths.append_incident("CONFIG", msg)
+
+    def _warn_no_cow(self) -> None:
+        """This filesystem has no copy-on-write, so the pre-image is a full byte
+        copy that costs real disk (guaranteed CoW only on APFS; on Linux, Btrfs/
+        XFS are CoW but ext4 is not). Warn once a week so it isn't a mystery, and
+        say what bounds it. Best-effort: a throttle-file error must never break
+        arming."""
+        keep = min(self.cfg.retention_days or 1 << 30,
+                   self.cfg.fallback_retention_days or 1 << 30)
+        try:
+            stamp = os.path.join(paths.revertly_home(), "cow_warned")
+            now = time.time()
+            try:
+                last = os.path.getmtime(stamp)
+            except OSError:
+                last = 0.0
+            if now - last < 7 * 86400:
+                return
+            with open(stamp, "w", encoding="utf-8") as f:
+                f.write(str(int(now)))
+        except OSError:
+            pass   # can't throttle -> still warn (below), just every time
+        import sys as _sys
+        msg = (f"snapshots are FULL COPIES on this filesystem (no copy-on-write) "
+               f"— they use real disk. revertly auto-deletes them after "
+               f"{keep}d; tune [retention] fallback_retention_days in "
+               f"{paths.config_path()}, or add big dirs to [watch] exclude.")
+        print(f"revertly ⚠ {msg}", file=_sys.stderr)
+        paths.append_incident("NO-COW", msg)
 
     def _resolve_scope(self) -> str:
         scope = self.cfg.watch_scope
@@ -384,7 +417,7 @@ class Session:
         # is logged but never blocks or breaks sealing.
         try:
             from . import retention
-            retention.enforce_policy(self.cfg, exclude=self.id)
+            retention.enforce_policy(self.cfg, exclude=self.id, cow=self._cow)
         except Exception as exc:
             paths.append_incident("RETENTION-FAIL", f"enforce at seal: {exc}")
         return self.meta

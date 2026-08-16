@@ -179,11 +179,19 @@ def apply(items: List[PruneItem], *, log: bool = True) -> int:
     return removed
 
 
-def enforce_policy(cfg, exclude=None) -> int:
+def enforce_policy(cfg, exclude=None, cow=True) -> int:
     """Automatic retention pass (run at seal): apply the config's day + disk
     limits, non-flagged only, quietly. `exclude` protects a session id (the one
-    just sealed) from being pruned by its own seal. Returns count pruned."""
+    just sealed) from being pruned by its own seal. Returns count pruned.
+
+    `cow=False` means the pre-images are full byte copies (no copy-on-write on
+    this filesystem), so history costs real disk — we then keep the SHORTER of
+    retention_days and fallback_retention_days to stop full copies piling up."""
     keep_days = getattr(cfg, "retention_days", None)
+    if not cow:
+        fb = getattr(cfg, "fallback_retention_days", None)
+        if fb:
+            keep_days = min(keep_days, fb) if keep_days else fb
     max_gb = getattr(cfg, "max_disk_gb", None)
     max_bytes = int(max_gb * 1e9) if max_gb else None
     if not keep_days and not max_bytes:

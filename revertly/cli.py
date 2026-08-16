@@ -769,7 +769,15 @@ def cmd_doctor(args) -> int:
               "(macOS/APFS only) — record + revert work; out-of-project "
               "disaster recovery does not")
     cow = ClonefileCloner().is_cow()
-    print(f"copy-on-write clones: {'yes (cheap pre-images)' if cow else 'no — pre-images are full copies on this filesystem'}")
+    if cow:
+        print("copy-on-write clones: yes (cheap pre-images)")
+    else:
+        _dcfg = load_config(paths.config_path())
+        _keep = min(_dcfg.retention_days or 1 << 30,
+                    _dcfg.fallback_retention_days or 1 << 30)
+        print("copy-on-write clones: no — pre-images are FULL COPIES on this "
+              f"filesystem (use real disk); auto-deleted after {_keep}d "
+              "([retention] fallback_retention_days)")
     # watcher import
     try:
         from .watch import PollingWatcher  # noqa

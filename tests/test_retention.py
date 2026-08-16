@@ -87,5 +87,31 @@ class TestPlan(unittest.TestCase):
         self.assertIn("older than", items[0].reason)
 
 
+class TestEnforcePolicyCoW(unittest.TestCase):
+    """The seal-time pass keeps the shorter window when the filesystem has no
+    copy-on-write, so full-copy pre-images don't pile up."""
+
+    class _Cfg:
+        retention_days = 30
+        fallback_retention_days = 7
+        max_disk_gb = None
+
+    def _run(self, cow):
+        from unittest import mock
+        from revertly import retention
+        # one sealed session 10 days old: kept under 30d, pruned under 7d
+        with mock.patch.object(retention, "collect",
+                               return_value=[S("mid", 10, 100)]), \
+             mock.patch.object(retention, "apply",
+                               side_effect=lambda items, **kw: len(items)):
+            return retention.enforce_policy(self._Cfg(), cow=cow)
+
+    def test_cow_keeps_full_window(self):
+        self.assertEqual(self._run(cow=True), 0)   # 10d < 30d -> kept
+
+    def test_no_cow_uses_shorter_window(self):
+        self.assertEqual(self._run(cow=False), 1)  # 10d > 7d -> pruned
+
+
 if __name__ == "__main__":
     unittest.main()

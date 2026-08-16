@@ -56,6 +56,10 @@ class Config:
     tripwire_on_write: str = "alert"     # alert | log   (block = Phase 2)
     tripwire_on_read: str = "alert"
     retention_days: int = 30
+    # on filesystems WITHOUT copy-on-write, the pre-image is a full byte copy,
+    # so history costs real disk. There we keep the shorter of retention_days
+    # and this, so full copies don't pile up. Ignored on CoW (APFS/Btrfs/XFS).
+    fallback_retention_days: int = 7
     max_disk_gb: float = 10.0
     on_arm_failure: str = "ask"          # ask | proceed | abort
     poll_interval: float = 0.5           # PollingWatcher cadence (seconds)
@@ -222,6 +226,7 @@ def parse_gb(v):
 
 # alias sets so a user writing the natural key/value gets the intended result
 _DAY_KEYS = {"sessions_days", "sessions", "retention_days", "days"}
+_FALLBACK_DAY_KEYS = {"fallback_retention_days", "fallback_days", "no_cow_days"}
 _DISK_KEYS = {"max_disk_gb", "max_disk", "disk_cap"}
 
 
@@ -233,6 +238,11 @@ def _apply(cfg: Config, section, key, val):
             d = parse_days(val)
             if d is not None:
                 cfg.retention_days = d
+            return
+        if key in _FALLBACK_DAY_KEYS:
+            d = parse_days(val)
+            if d is not None:
+                cfg.fallback_retention_days = d
             return
         if key in _DISK_KEYS:
             g = parse_gb(val)
